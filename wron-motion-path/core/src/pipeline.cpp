@@ -79,8 +79,8 @@ FramePlan planFrame(double time, const ShutterSettings& sh, const PoseAtTime& po
     const bool previewOff = ctx.previewRender && sh.preview == PreviewBlur::Off;
     const double angle = std::isfinite(sh.angleDeg) ? std::clamp(sh.angleDeg, 0.0, 720.0) : 0.0;
     if (!sh.enabled || previewOff || angle <= 0.0) {
-        plan.times = {time};
-        plan.poses = {poseAt(time)};
+        plan.times.push_back(time);
+        plan.poses.push_back(poseAt(time));
         return plan;
     }
     const double phase = std::isfinite(sh.phaseDeg) ? std::clamp(sh.phaseDeg, -360.0, 360.0) : 0.0;
