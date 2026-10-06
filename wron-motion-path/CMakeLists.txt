@@ -80,8 +80,10 @@ if(WMP_BUILD_OFX)
     SUFFIX ".ofx"
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-    LIBRARY_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}"
-    RUNTIME_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}")
+    # "$<0:>" stops multi-config generators (Visual Studio) from appending
+    # /Release or /Debug, which would break the OFX bundle layout.
+    LIBRARY_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}$<0:>"
+    RUNTIME_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}$<0:>")
   if(MSVC)
     # Static CRT: the bundle needs no extra runtime DLLs next to VEGAS.
     set_property(TARGET WronMotionPath wmp_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

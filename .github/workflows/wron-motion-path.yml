@@ -1,0 +1,106 @@
+name: wron-motion-path
+
+on:
+  push:
+    paths:
+      - 'wron-motion-path/**'
+      - '.github/workflows/wron-motion-path.yml'
+  pull_request:
+    paths:
+      - 'wron-motion-path/**'
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux - core, mock OFX host, editor
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: wron-motion-path
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build libgl-dev libosmesa6-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: C++ tests (core + mock OFX host + OpenGL overlay)
+        run: ctest --test-dir build --output-on-failure
+      - name: Parameter dump of the built plug-in matches the committed editor schema input
+        run: |
+          ./build/wmp_ofx_describe build/WronMotionPath.ofx.bundle/Contents/Linux-x86-64/WronMotionPath.ofx > testdata/ofx-params.json
+          git diff --exit-code -- testdata/ofx-params.json
+      - name: Regenerate golden vectors from this C++ build (JS tests compare against them)
+        run: ./build/wmp_golden > testdata/golden.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Editor unit tests
+        working-directory: wron-motion-path/editor
+        run: node --test test/*.test.js
+      - name: Editor browser verification (headless Chromium, mock host)
+        working-directory: wron-motion-path/editor
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node scripts/verify-browser.mjs --screenshots ../build/editor-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-screenshots
+          path: wron-motion-path/build/editor-screenshots
+          retention-days: 7
+
+  sanitizers:
+    name: Linux - ASan/UBSan and TSan
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: wron-motion-path
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build libgl-dev
+      - name: ASan + UBSan
+        run: |
+          cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" -DCMAKE_MODULE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build-asan
+          ./build-asan/wmp_core_tests
+          ./build-asan/wmp_ofx_host_tests
+      - name: TSan
+        run: |
+          cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" -DCMAKE_MODULE_LINKER_FLAGS="-fsanitize=thread"
+          cmake --build build-tsan
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan/wmp_core_tests
+          TSAN_OPTIONS=halt_on_error=1 ./build-tsan/wmp_ofx_host_tests
+
+  windows:
+    name: Windows x64 - MSVC build (VEGAS target)
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: wron-motion-path
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Visual Studio 2022, x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build Release
+        run: cmake --build build --config Release
+      - name: Core tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Inspect the plug-in DLL
+        shell: pwsh
+        run: |
+          $dll = "build/WronMotionPath.ofx.bundle/Contents/Win64/WronMotionPath.ofx"
+          if (-not (Test-Path $dll)) { throw "bundle layout broken: $dll missing" }
+          Get-Item $dll | Format-List FullName, Length
+          $dumpbin = (Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
+          & $dumpbin /exports /dependents $dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WronMotionPath-DEV-build-not-for-distribution
+          path: wron-motion-path/build/WronMotionPath.ofx.bundle
+          retention-days: 7
