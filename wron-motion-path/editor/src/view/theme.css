@@ -1,0 +1,212 @@
+/* Wron Motion Path editor. Theme tokens are custom properties on .wmp-root;
+   data-theme="light" switches the palette. The component fills its container
+   and never widens it (contain: inline-size). */
+.wmp-root {
+  --wmp-bg: #16181d;
+  --wmp-panel: #1d2026;
+  --wmp-panel-2: #23272e;
+  --wmp-border: #30353e;
+  --wmp-text: #e6e8ec;
+  --wmp-text-dim: #9aa3b0;
+  --wmp-accent: #3db8ff;
+  --wmp-accent-2: #ffc23a;
+  --wmp-danger: #ff5c5c;
+  --wmp-stage: #0f1114;
+  --wmp-frame: #1b1e23;
+  --wmp-frame-edge: #4a5260;
+  --wmp-path: #3db8ff;
+  --wmp-path-outline: rgba(0, 0, 0, 0.75);
+  --wmp-anchor: #ffffff;
+  --wmp-selected: #ffc23a;
+  --wmp-marker: #ff5c7a;
+  --wmp-grid: rgba(255, 255, 255, 0.07);
+  --wmp-grid-major: rgba(255, 255, 255, 0.16);
+  --wmp-input: #121418;
+  --wmp-focus: #3db8ff;
+  --wmp-radius: 6px;
+  --wmp-font: system-ui, -apple-system, "Segoe UI", "Noto Sans", "Microsoft YaHei", sans-serif;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  contain: inline-size;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--wmp-bg);
+  color: var(--wmp-text);
+  font: 12px/1.35 var(--wmp-font);
+  outline: none;
+}
+.wmp-root[data-theme="light"] {
+  --wmp-bg: #f3f4f6;
+  --wmp-panel: #ffffff;
+  --wmp-panel-2: #f0f2f5;
+  --wmp-border: #d5d9e0;
+  --wmp-text: #1d2128;
+  --wmp-text-dim: #5d6673;
+  --wmp-accent: #0a84d6;
+  --wmp-accent-2: #c77700;
+  --wmp-stage: #dfe2e7;
+  --wmp-frame: #f8f9fb;
+  --wmp-frame-edge: #9aa3b0;
+  --wmp-path: #0a84d6;
+  --wmp-path-outline: rgba(255, 255, 255, 0.9);
+  --wmp-anchor: #ffffff;
+  --wmp-selected: #e08600;
+  --wmp-marker: #e0245e;
+  --wmp-grid: rgba(0, 0, 0, 0.06);
+  --wmp-grid-major: rgba(0, 0, 0, 0.14);
+  --wmp-input: #ffffff;
+}
+.wmp-root *, .wmp-root *::before, .wmp-root *::after { box-sizing: border-box; }
+.wmp-root:focus-visible { box-shadow: inset 0 0 0 1px var(--wmp-focus); }
+
+.wmp-banner {
+  flex: none;
+  padding: 3px 8px;
+  background: #5a3d00;
+  color: #ffe4a8;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wmp-root[data-theme="light"] .wmp-banner { background: #fff1cc; color: #6b4a00; }
+
+/* Toolbar */
+.wmp-toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  background: var(--wmp-panel);
+  border-bottom: 1px solid var(--wmp-border);
+}
+.wmp-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--wmp-border); }
+.wmp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--wmp-radius);
+  background: transparent;
+  color: var(--wmp-text);
+  font: inherit;
+  cursor: pointer;
+}
+.wmp-btn:hover:not(:disabled) { background: var(--wmp-panel-2); }
+.wmp-btn:focus-visible { outline: 2px solid var(--wmp-focus); outline-offset: -1px; }
+.wmp-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--wmp-accent) 22%, transparent); border-color: color-mix(in srgb, var(--wmp-accent) 55%, transparent); }
+.wmp-btn:disabled { opacity: 0.38; cursor: default; }
+.wmp-btn svg { width: 16px; height: 16px; flex: none; }
+.wmp-btn .wmp-label { white-space: nowrap; }
+.wmp-zoom { min-width: 44px; text-align: center; color: var(--wmp-text-dim); font-variant-numeric: tabular-nums; }
+.wmp-spacer { flex: 1 1 auto; }
+.wmp-root[data-size~="narrow"] .wmp-btn .wmp-label { display: none; }
+.wmp-btn-inspector { display: none; }
+.wmp-root[data-size~="short"] [data-tier="secondary"],
+.wmp-root[data-size~="tiny"] [data-tier="secondary"] { display: none; }
+.wmp-root[data-size~="short"] .wmp-toolbar,
+.wmp-root[data-size~="tiny"] .wmp-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.wmp-root[data-size~="micro"] .wmp-banner,
+.wmp-root[data-size~="micro"] .wmp-status { display: none; }
+.wmp-root[data-size~="short"] .wmp-btn-inspector,
+.wmp-root[data-size~="tiny"] .wmp-btn-inspector { display: inline-flex; }
+
+/* Main area */
+.wmp-main { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; }
+.wmp-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 80px; background: var(--wmp-stage); overflow: hidden; touch-action: none; }
+.wmp-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.wmp-status {
+  position: absolute; left: 6px; bottom: 4px; right: 6px;
+  color: var(--wmp-text-dim); font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
+}
+.wmp-root[data-theme="light"] .wmp-status { text-shadow: none; }
+.wmp-toast {
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  max-width: calc(100% - 16px); padding: 4px 10px; border-radius: var(--wmp-radius);
+  background: var(--wmp-panel); border: 1px solid var(--wmp-border); color: var(--wmp-text);
+  box-shadow: 0 4px 14px rgba(0,0,0,.35); font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .15s;
+}
+.wmp-toast[data-show="true"] { opacity: 1; }
+.wmp-toast[data-kind="error"] { border-color: var(--wmp-danger); }
+@media (prefers-reduced-motion: reduce) { .wmp-toast { transition: none; } }
+
+/* Inspector */
+.wmp-inspector {
+  flex: none;
+  width: 268px;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--wmp-panel);
+  border-left: 1px solid var(--wmp-border);
+}
+.wmp-root[data-size~="narrow"] .wmp-main { flex-direction: column; }
+.wmp-root[data-size~="narrow"] .wmp-inspector { width: auto; max-height: 46%; border-left: 0; border-top: 1px solid var(--wmp-border); }
+.wmp-root[data-size~="short"] .wmp-inspector,
+.wmp-root[data-size~="tiny"] .wmp-inspector {
+  position: absolute; z-index: 5; right: 0; top: 0; bottom: 0; width: min(300px, 92%); max-height: none;
+  border-left: 1px solid var(--wmp-border); border-top: 0; box-shadow: -6px 0 18px rgba(0,0,0,.35);
+  display: none;
+}
+.wmp-root[data-inspector="open"][data-size~="short"] .wmp-inspector,
+.wmp-root[data-inspector="open"][data-size~="tiny"] .wmp-inspector { display: block; }
+.wmp-root[data-size~="short"] .wmp-main,
+.wmp-root[data-size~="tiny"] .wmp-main { position: relative; flex-direction: row; }
+
+.wmp-section { border-bottom: 1px solid var(--wmp-border); }
+.wmp-section > summary {
+  list-style: none; cursor: pointer; padding: 6px 8px; font-weight: 600; font-size: 11px;
+  letter-spacing: .02em; text-transform: uppercase; color: var(--wmp-text-dim); user-select: none;
+}
+.wmp-section > summary::-webkit-details-marker { display: none; }
+.wmp-section > summary::before { content: "▸"; display: inline-block; width: 12px; transition: transform .1s; }
+.wmp-section[open] > summary::before { transform: rotate(90deg); }
+.wmp-section-body { padding: 2px 8px 8px; display: grid; gap: 5px; }
+.wmp-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: center; gap: 6px; min-width: 0; }
+.wmp-row > label, .wmp-row > .wmp-row-label {
+  overflow: hidden; color: var(--wmp-text-dim); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2;
+}
+.wmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; min-width: 0; }
+.wmp-input, .wmp-select {
+  width: 100%; min-width: 0; height: 24px; padding: 0 6px; border-radius: 4px;
+  border: 1px solid var(--wmp-border); background: var(--wmp-input); color: var(--wmp-text);
+  font: inherit; font-variant-numeric: tabular-nums;
+}
+.wmp-input:focus, .wmp-select:focus { outline: none; border-color: var(--wmp-focus); }
+.wmp-input[aria-invalid="true"] { border-color: var(--wmp-danger); box-shadow: 0 0 0 1px var(--wmp-danger); }
+.wmp-input:disabled, .wmp-select:disabled { opacity: .45; }
+.wmp-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.wmp-check input { accent-color: var(--wmp-accent); width: 14px; height: 14px; margin: 0; }
+.wmp-note { color: var(--wmp-text-dim); font-size: 11px; }
+.wmp-error { color: var(--wmp-danger); font-size: 11px; }
+.wmp-badge { font-size: 10px; color: var(--wmp-accent-2); }
+.wmp-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; }
+.wmp-seg .wmp-btn { border-color: var(--wmp-border); padding: 0 4px; min-width: 0; }
+.wmp-range { width: 100%; accent-color: var(--wmp-accent); }
+.wmp-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; }
+.wmp-preset {
+  display: grid; justify-items: center; gap: 2px; padding: 4px 2px; border-radius: var(--wmp-radius);
+  border: 1px solid var(--wmp-border); background: var(--wmp-panel-2); color: var(--wmp-text);
+  font: inherit; font-size: 11px; cursor: pointer; min-width: 0;
+}
+.wmp-preset:hover:not(:disabled) { border-color: var(--wmp-accent); }
+.wmp-preset:disabled { opacity: .4; cursor: default; }
+.wmp-preset svg { width: 52px; height: 30px; }
+.wmp-preset span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wmp-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.wmp-actions .wmp-btn { border-color: var(--wmp-border); }

@@ -137,7 +137,15 @@ if(WMP_BUILD_TESTS)
       add_dependencies(wmp_ofx_gl_overlay_test WronMotionPath)
       add_test(NAME ofx_gl_overlay COMMAND wmp_ofx_gl_overlay_test)
     endif()
+
+    add_executable(wmp_ofx_describe tools/ofx_describe.cpp ofx/tests/mock_host.cpp)
+    target_include_directories(wmp_ofx_describe PRIVATE ofx/third_party/openfx-1.5.1/include)
+    target_link_libraries(wmp_ofx_describe PRIVATE wmp_core ${CMAKE_DL_LIBS})
+    add_dependencies(wmp_ofx_describe WronMotionPath)
   endif()
+
+  add_executable(wmp_golden tools/golden.cpp)
+  target_link_libraries(wmp_golden PRIVATE wmp_core)
 
   add_executable(wmp_bench tools/bench_render.cpp)
   target_link_libraries(wmp_bench PRIVATE wmp_core)
