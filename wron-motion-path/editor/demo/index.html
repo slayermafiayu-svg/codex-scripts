@@ -54,7 +54,9 @@
   for (const l of LOCALES) lang.append(new Option(l, l));
   lang.value = params.get('lang') || 'en';
   lang.onchange = () => editor.setLocale(lang.value);
-  document.getElementById('theme').onchange = (e) => editor.setTheme(e.target.value);
+  const theme = document.getElementById('theme');
+  theme.value = params.get('theme') || 'dark';
+  theme.onchange = (e) => editor.setTheme(e.target.value);
   document.getElementById('size').onchange = (e) => {
     const [w, h] = e.target.value.split('x');
     const dock = document.getElementById('dock');

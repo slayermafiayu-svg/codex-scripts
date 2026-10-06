@@ -344,7 +344,7 @@ try {
   // Small docks.
   for (const [w, h] of [[760, 480], [420, 300], [360, 240], [320, 180], [900, 180]]) {
     page = await open({ width: 1200, height: 800 });
-    await page.evaluate(({ w: ww, h: hh }) => { const dk = document.getElementById('dock'); dk.style.width = `${ww}px`; dk.style.height = `${hh}px`; }, { w, h });
+    await page.selectOption('#size', `${w}x${h}`);
     await page.waitForTimeout(150);
     const info = await page.evaluate(() => {
       const ed = window.wmpEditor;
