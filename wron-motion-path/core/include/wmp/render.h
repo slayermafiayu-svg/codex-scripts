@@ -90,10 +90,22 @@ private:
     std::vector<Level> levels_;
 };
 
+// Texture filter footprint for an affine output->source mapping.
+// The mip level follows the MINOR axis of the pixel footprint and up to 8
+// taps are taken along the MAJOR axis (simple anisotropic filtering), so a
+// one-axis squash (scale Y 25 %, X 100 %) is not blurred horizontally.
+struct FilterFootprint {
+    double lod = 0.0;      // mip level (0 = full resolution)
+    int taps = 1;          // samples along the major axis
+    Vec2 tapStep;          // level-0 source px between taps
+    double reach = 1.0;    // level-0 source px the filter can reach from the centre (RoI padding)
+};
+FilterFootprint filterFor(const Affine& outToSrc);
+
 struct RenderSample {
     Affine outToSrc;   // output pixel coords -> source level-0 pixel coords
     float weight = 1;  // opacity / sample count
-    double lod = 0.0;  // mip level of detail (0 = full resolution)
+    FilterFootprint filter;
     RectI coverage;    // output pixels this sample may touch (inside the window)
 };
 
@@ -104,12 +116,12 @@ struct RenderJob {
     ImageView dst;     // must contain the window
 };
 
-// Prepares coverage and LOD for a sample whose transform maps output pixels
-// to source pixels. Returns false if the sample cannot contribute.
-bool prepareSample(RenderSample& s, const SourceTexture& tex, const RectI& window);
-
-// Mip level needed by a sample (for region-of-interest padding).
-double lodFor(const Affine& outToSrc);
+// Prepares coverage and filter for a sample whose transform maps output
+// pixels to source pixels. `filterBasis`, when given, is used instead of
+// outToSrc to size the filter (field renders exclude the 2x row skip so the
+// two fields are never blended). Returns false if it cannot contribute.
+bool prepareSample(RenderSample& s, const SourceTexture& tex, const RectI& window,
+                   const Affine* filterBasis = nullptr);
 
 // Renders rows [y0, y1) of job.window. Bands are independent, so callers can
 // split the window across threads. `abort` is polled once per row.

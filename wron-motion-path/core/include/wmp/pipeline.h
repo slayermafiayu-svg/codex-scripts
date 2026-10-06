@@ -43,11 +43,25 @@ struct ShutterSettings {
 
 struct RenderContext {
     FrameRect frame;            // project frame, canonical
-    double renderScaleX = 1.0, renderScaleY = 1.0;
-    double srcPar = 1.0, dstPar = 1.0;
+    Affine srcToPixel;          // source canonical -> source pixel coordinates
+    Affine dstToPixel;          // output canonical -> output pixel coordinates
     RectD srcRect;              // source region of definition, canonical
     RenderQuality quality = RenderQuality::Good;
     bool previewRender = false; // host signalled a preview (draft quality or render scale < 1)
+
+    // Standard OFX mapping: pixel = canonical * (renderScale.x / PAR, renderScale.y).
+    void setPixelMapping(double renderScaleX, double renderScaleY, double srcPar, double dstPar) {
+        srcToPixel = canonicalToPixel(renderScaleX, renderScaleY, srcPar > 0.0 ? srcPar : 1.0);
+        dstToPixel = canonicalToPixel(renderScaleX, renderScaleY, dstPar > 0.0 ? dstPar : 1.0);
+    }
+    // Single-field render (half-height output image). Lower field = full-frame
+    // pixel rows 0,2,4..., upper = 1,3,5... (OFX pixel rows, Y up).
+    void setFieldOutput(bool upperField) {
+        const Affine half{1, 0, 0, 0.5, 0, upperField ? -0.25 : 0.25};
+        dstToPixel = half * dstToPixel;
+        fieldRender = true;
+    }
+    bool fieldRender = false;   // filter sizing ignores the 2x row skip of a field
 };
 
 struct SamplePose {

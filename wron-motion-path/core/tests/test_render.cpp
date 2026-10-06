@@ -297,8 +297,7 @@ TEST(render_scale_and_par_keep_placement) {
             RenderContext ctx;
             ctx.frame = {0, 0, pxW * par, double(pxH)};  // canonical width includes PAR
             ctx.srcRect = {0, 0, pxW * par, double(pxH)};
-            ctx.renderScaleX = ctx.renderScaleY = rs;
-            ctx.srcPar = ctx.dstPar = par;
+            ctx.setPixelMapping(rs, rs, par, par);
             PathGeometry g(path, {ctx.frame.aspect(), 1e-9});
             MotionParams mp;
             const Pose pose = evaluatePose(&g, mp);
@@ -370,4 +369,60 @@ TEST(identity_plan_detection) {
     plan.poses[0].opacity = 1.0;
     plan.poses[0].srcToOut = Affine::translate({0.01, 0});
     CHECK(!isIdentityPlan(plan, ctx));
+}
+
+TEST(field_output_maps_rows_of_one_field) {
+    // A horizontal 1-px line at full-frame pixel row 6 (OFX rows, Y up) belongs
+    // to the lower field (even rows) -> field row 3, and is absent from the
+    // upper field render except for interpolation.
+    const RectI full{0, 0, 16, 16};
+    const float c[4] = {1, 1, 1, 1};
+    Image src = solidRect(full, {0, 6, 16, 7}, c);
+    RenderContext ctx = contextFor(16, 16);
+    FramePlan plan;
+    plan.times = {0};
+    plan.poses = {SamplePose{}};
+    ctx.setFieldOutput(false);
+    Image lower({0, 0, 16, 8}, PixelDepth::F32);
+    renderPlan(plan, src, lower, ctx, {0, 0, 16, 8});
+    CHECK_NEAR(lower.f(5, 3)[3], 1.0, 1e-6);
+    CHECK_NEAR(lower.f(5, 2)[3], 0.0, 1e-6);
+    RenderContext ctxU = contextFor(16, 16);
+    ctxU.setFieldOutput(true);
+    Image upper({0, 0, 16, 8}, PixelDepth::F32);
+    renderPlan(plan, src, upper, ctxU, {0, 0, 16, 8});
+    // Upper field rows are full rows 1,3,5,7: the even-row line is not in it,
+    // and the fields are never blended together.
+    for (int y = 0; y < 8; ++y) CHECK_NEAR(upper.f(5, y)[3], 0.0, 1e-6);
+}
+
+TEST(one_axis_squash_keeps_other_axis_sharp) {
+    // Vertical 1-px stripes, squashed to 25 % in Y only: stripes must stay
+    // crisp horizontally (isotropic mip selection would blur them to grey).
+    const RectI frame{0, 0, 64, 64};
+    Image src(frame, PixelDepth::F32);
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x) {
+            float* p = src.f(x, y);
+            const float v = (x & 1) ? 1.0f : 0.0f;
+            p[0] = p[1] = p[2] = v;
+            p[3] = 1.0f;
+        }
+    RenderContext ctx = contextFor(64, 64);
+    FramePlan plan;
+    plan.times = {0};
+    SamplePose p;
+    p.srcToOut = Affine::translate({0, 32}) * Affine::scale(1.0, 0.25) * Affine::translate({0, -32});
+    plan.poses = {p};
+    Image dst(frame, PixelDepth::F32);
+    renderPlan(plan, src, dst, ctx, frame);
+    CHECK_NEAR(dst.f(10, 32)[0], 0.0, 1e-5);
+    CHECK_NEAR(dst.f(11, 32)[0], 1.0, 1e-5);
+    const FilterFootprint f = filterFor(Affine::scale(1.0, 4.0));
+    CHECK(f.taps == 4);
+    CHECK_NEAR(f.lod, 0.0, 0.0);
+    CHECK_NEAR(std::fabs(f.tapStep.y), 1.0, 1e-12);
+    // Uniform minification: no extra taps.
+    CHECK(filterFor(Affine::scale(4.0, 4.0)).taps == 1);
+    CHECK_NEAR(filterFor(Affine::scale(4.0, 4.0)).lod, 2.0, 1e-12);
 }

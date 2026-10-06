@@ -20,10 +20,6 @@ double spacingFor(RenderQuality q) {
     return 1.0;
 }
 
-Affine pixelOf(const RenderContext& ctx, double par) {
-    return canonicalToPixel(ctx.renderScaleX, ctx.renderScaleY, par > 0.0 ? par : 1.0);
-}
-
 // Source rectangle used to measure on-screen travel: the source RoD, or the
 // frame when the RoD is unbounded / empty.
 RectD probeRect(const RenderContext& ctx) {
@@ -63,7 +59,7 @@ struct TravelProbe {
 
 double measureTravel(double open, double close, const PoseAtTime& poseAt, const RenderContext& ctx) {
     const RectD r = probeRect(ctx);
-    TravelProbe probe{poseAt, {{r.x1, r.y1}, {r.x2, r.y1}, {r.x1, r.y2}, {r.x2, r.y2}}, pixelOf(ctx, ctx.dstPar)};
+    TravelProbe probe{poseAt, {{r.x1, r.y1}, {r.x2, r.y1}, {r.x1, r.y2}, {r.x2, r.y2}}, ctx.dstToPixel};
     double tPrev = open;
     SamplePose prev = poseAt(open);
     for (int i = 1; i <= kProbeIntervals; ++i) {
@@ -124,7 +120,7 @@ bool isIdentityPlan(const FramePlan& plan, const RenderContext& ctx) {
     const SamplePose& p = plan.poses[0];
     if (!(p.opacity >= 1.0)) return false;
     const Affine& m = p.srcToOut;
-    const double pxPerCanon = std::max(ctx.renderScaleX, ctx.renderScaleY) * 2.0;
+    const double pxPerCanon = std::max(ctx.dstToPixel.maxStretch(), 1e-9) * 2.0;
     return std::fabs(m.a - 1.0) < 1e-9 && std::fabs(m.b) < 1e-9 && std::fabs(m.c) < 1e-9 &&
            std::fabs(m.d - 1.0) < 1e-9 && std::fabs(m.tx) * pxPerCanon < 1e-4 && std::fabs(m.ty) * pxPerCanon < 1e-4;
 }
@@ -138,19 +134,22 @@ RectD planRegionOfDefinition(const FramePlan& plan, const RenderContext& ctx) {
 
 RectD planRegionOfInterest(const FramePlan& plan, const RectD& outWindow, const RenderContext& ctx) {
     RectD roi;
-    const Affine srcPx = pixelOf(ctx, ctx.srcPar);
-    const Affine dstPx = pixelOf(ctx, ctx.dstPar);
+    const Affine& srcPx = ctx.srcToPixel;
     Affine dstPxInv;
-    dstPx.inverse(dstPxInv);
+    ctx.dstToPixel.inverse(dstPxInv);
+    Affine srcPxInv;
+    srcPx.inverse(srcPxInv);
+    // Canonical size of one source pixel along x and y.
+    const double canonPerPxX = std::fabs(srcPxInv.a) + std::fabs(srcPxInv.b);
+    const double canonPerPxY = std::fabs(srcPxInv.c) + std::fabs(srcPxInv.d);
     for (const SamplePose& p : plan.poses) {
         Affine inv;
         if (!p.srcToOut.inverse(inv)) continue;
         RectD r = transformBounds(inv, outWindow);
-        // Bilinear/mip footprint padding, expressed in canonical units.
-        const double lod = lodFor(srcPx * inv * dstPxInv);
-        const double padPx = std::ldexp(1.0, static_cast<int>(std::ceil(lod))) + 2.0;
-        const double padX = padPx * ctx.srcPar / std::max(ctx.renderScaleX, 1e-9);
-        const double padY = padPx / std::max(ctx.renderScaleY, 1e-9);
+        // Filter footprint padding, expressed in canonical units.
+        const double padPx = filterFor(srcPx * inv * dstPxInv).reach + 1.0;
+        const double padX = padPx * canonPerPxX;
+        const double padY = padPx * canonPerPxY;
         r.x1 -= padX;
         r.x2 += padX;
         r.y1 -= padY;
@@ -166,10 +165,9 @@ RenderJob buildRenderJob(const FramePlan& plan, SourceTexture& texture, const Im
     job.texture = &texture;
     job.window = window;
     job.dst = dst;
-    const Affine srcPx = pixelOf(ctx, ctx.srcPar);
-    const Affine dstPx = pixelOf(ctx, ctx.dstPar);
+    const Affine& srcPx = ctx.srcToPixel;
     Affine dstPxInv;
-    dstPx.inverse(dstPxInv);
+    ctx.dstToPixel.inverse(dstPxInv);
     const double n = static_cast<double>(std::max<std::size_t>(1, plan.poses.size()));
     int maxLevel = 0;
     for (const SamplePose& p : plan.poses) {
@@ -178,8 +176,10 @@ RenderJob buildRenderJob(const FramePlan& plan, SourceTexture& texture, const Im
         RenderSample s;
         s.outToSrc = srcPx * inv * dstPxInv;
         s.weight = static_cast<float>(std::clamp(p.opacity, 0.0, 1.0) / n);
-        if (!prepareSample(s, texture, window)) continue;
-        maxLevel = std::max(maxLevel, static_cast<int>(std::ceil(s.lod)));
+        // Field renders: size the filter as if the full frame were rendered.
+        const Affine basis = ctx.fieldRender ? s.outToSrc * Affine::scale(1.0, 0.5) : s.outToSrc;
+        if (!prepareSample(s, texture, window, &basis)) continue;
+        maxLevel = std::max(maxLevel, static_cast<int>(std::ceil(s.filter.lod)));
         job.samples.push_back(s);
     }
     if (maxLevel > 0) texture.ensureLevels(maxLevel);

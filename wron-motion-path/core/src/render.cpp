@@ -295,25 +295,48 @@ void SourceTexture::sampleTrilinear(double lod, double x, double y, float out[4]
     v4store(out, v4add(a, v4mul(v4sub(b, a), v4set1(f))));
 }
 
-double lodFor(const Affine& outToSrc) {
-    const double stretch = outToSrc.maxStretch();
-    if (!(stretch > 1.0) || !std::isfinite(stretch)) return 0.0;
-    const double lod = std::log2(stretch);
-    // No filtering for mild minification; ramp continuously so an animated
-    // scale never pops between sharp and filtered.
-    if (lod < 0.25) return 0.0;
-    if (lod < 1.0) return (lod - 0.25) / 0.75;
-    return lod;
+FilterFootprint filterFor(const Affine& m) {
+    FilterFootprint f;
+    // Singular values / left singular vector of the linear part.
+    const double E = 0.5 * (m.a + m.d), F = 0.5 * (m.a - m.d), G = 0.5 * (m.c + m.b), H = 0.5 * (m.c - m.b);
+    const double Q = std::hypot(E, H), R = std::hypot(F, G);
+    const double smax = Q + R, smin = std::fabs(Q - R);
+    if (!std::isfinite(smax) || !std::isfinite(smin)) return f;
+    const double phi = 0.5 * (std::atan2(H, E) + std::atan2(G, F));
+    const Vec2 major{std::cos(phi), std::sin(phi)};
+    auto softLod = [](double stretch) {
+        if (!(stretch > 1.0)) return 0.0;
+        const double l = std::log2(stretch);
+        // No filtering for mild minification; ramp continuously so an
+        // animated scale never pops between sharp and filtered.
+        if (l < 0.25) return 0.0;
+        if (l < 1.0) return (l - 0.25) / 0.75;
+        return l;
+    };
+    constexpr int kMaxTaps = 8;
+    double lod = softLod(smin);
+    const double texel = std::ldexp(1.0, static_cast<int>(std::floor(lod)));
+    int taps = static_cast<int>(std::ceil(smax / std::max(texel, 1.0) - 1e-9));
+    if (taps > kMaxTaps) {
+        // Too anisotropic: trade some sharpness on the minor axis for a bounded cost.
+        lod = softLod(smax / kMaxTaps);
+        taps = kMaxTaps;
+    }
+    f.lod = lod;
+    f.taps = std::max(1, taps);
+    if (f.taps > 1) f.tapStep = major * (smax / f.taps);
+    f.reach = 0.5 * smax + std::ldexp(1.0, static_cast<int>(std::ceil(lod))) + 1.0;
+    return f;
 }
 
-bool prepareSample(RenderSample& s, const SourceTexture& tex, const RectI& window) {
+bool prepareSample(RenderSample& s, const SourceTexture& tex, const RectI& window, const Affine* filterBasis) {
     s.coverage = {};
     if (tex.empty() || !(s.weight > 0.0f) || !s.outToSrc.isFinite()) return false;
     Affine srcToOut;
     if (!s.outToSrc.inverse(srcToOut)) return false;
-    s.lod = lodFor(s.outToSrc);
+    s.filter = filterFor(filterBasis ? *filterBasis : s.outToSrc);
     const RectI b = tex.bounds();
-    const double pad = std::ldexp(1.0, static_cast<int>(std::ceil(s.lod))) + 1.0;
+    const double pad = s.filter.reach;
     const RectD src{b.x1 - pad, b.y1 - pad, b.x2 + pad, b.y2 + pad};
     s.coverage = enclosingRect(transformBounds(srcToOut, src)).intersect(window);
     return !s.coverage.empty();
@@ -328,7 +351,7 @@ inline void accumulateRow(const RenderSample& s, const SourceTexture& tex, int l
     const double cy = y + 0.5;
     // Source position along this row: sx = m.a*(x+0.5) + bx, sy = m.c*(x+0.5) + by.
     const double bx = m.b * cy + m.tx, by = m.d * cy + m.ty;
-    const double pad = std::ldexp(1.0, static_cast<int>(std::ceil(s.lod))) + 1.0;
+    const double pad = s.filter.reach;
     double Xlo = s.coverage.x1 + 0.5, Xhi = s.coverage.x2 + 0.5;
     clipLinear(m.a, bx, tb.x1 - pad, tb.x2 + pad, Xlo, Xhi);
     clipLinear(m.c, by, tb.y1 - pad, tb.y2 + pad, Xlo, Xhi);
@@ -338,10 +361,11 @@ inline void accumulateRow(const RenderSample& s, const SourceTexture& tex, int l
     // The mip level is constant per sample (affine transform).
     int l0 = 0;
     float frac = 0.0f;
-    if (s.lod > 0.0 && levels > 1) {
-        const double fl = std::floor(s.lod);
+    const double lod = s.filter.lod;
+    if (lod > 0.0 && levels > 1) {
+        const double fl = std::floor(lod);
         l0 = static_cast<int>(fl);
-        frac = static_cast<float>(s.lod - fl);
+        frac = static_cast<float>(lod - fl);
         if (l0 >= levels - 1) {
             l0 = levels - 1;
             frac = 0.0f;
@@ -351,13 +375,29 @@ inline void accumulateRow(const RenderSample& s, const SourceTexture& tex, int l
     const bool tri = frac >= 1e-4f;
     const SourceTexture::LevelView L1 = tri ? tex.level(l0 + 1) : L0;
     const V4 vf = v4set1(frac);
-    const V4 vw = v4set1(s.weight);
+    const int taps = s.filter.taps;
+    const V4 vw = v4set1(s.weight / static_cast<float>(taps));
+    const double tdx = s.filter.tapStep.x, tdy = s.filter.tapStep.y;
+    const double t0 = -0.5 * (taps - 1);
     double sx = m.a * (xs + 0.5) + bx, sy = m.c * (xs + 0.5) + by;
     float* a = acc + static_cast<std::size_t>(xs - win.x1) * 4u;
+    if (taps == 1) {
+        for (int x = xs; x < xe; ++x, a += 4, sx += m.a, sy += m.c) {
+            V4 c = bilinear(L0, sx, sy);
+            if (tri) c = v4add(c, v4mul(v4sub(bilinear(L1, sx, sy), c), vf));
+            v4store(a, v4add(v4load(a), v4mul(c, vw)));
+        }
+        return;
+    }
     for (int x = xs; x < xe; ++x, a += 4, sx += m.a, sy += m.c) {
-        V4 c = bilinear(L0, sx, sy);
-        if (tri) c = v4add(c, v4mul(v4sub(bilinear(L1, sx, sy), c), vf));
-        v4store(a, v4add(v4load(a), v4mul(c, vw)));
+        V4 sum = v4zero();
+        for (int k = 0; k < taps; ++k) {
+            const double px = sx + (t0 + k) * tdx, py = sy + (t0 + k) * tdy;
+            V4 c = bilinear(L0, px, py);
+            if (tri) c = v4add(c, v4mul(v4sub(bilinear(L1, px, py), c), vf));
+            sum = v4add(sum, c);
+        }
+        v4store(a, v4add(v4load(a), v4mul(sum, vw)));
     }
 }
 
