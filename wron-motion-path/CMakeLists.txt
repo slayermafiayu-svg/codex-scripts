@@ -21,6 +21,10 @@ endif()
 option(WMP_BUILD_TESTS "Build unit tests and the mock OFX host" ON)
 option(WMP_BUILD_OFX "Build the OFX plug-in bundle" ON)
 
+# Static CRT for every target on MSVC: the plug-in bundle then needs no extra
+# runtime DLLs next to VEGAS, and the core library links into tests and tools.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -84,10 +88,7 @@ if(WMP_BUILD_OFX)
     # /Release or /Debug, which would break the OFX bundle layout.
     LIBRARY_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}$<0:>"
     RUNTIME_OUTPUT_DIRECTORY "${WMP_BUNDLE_DIR}/Contents/${WMP_OFX_ARCH}$<0:>")
-  if(MSVC)
-    # Static CRT: the bundle needs no extra runtime DLLs next to VEGAS.
-    set_property(TARGET WronMotionPath wmp_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-  elseif(MINGW)
+  if(MINGW)
     target_link_options(WronMotionPath PRIVATE -static -static-libgcc -static-libstdc++)
   endif()
 
@@ -139,6 +140,11 @@ if(WMP_BUILD_TESTS)
       add_dependencies(wmp_ofx_gl_overlay_test WronMotionPath)
       add_test(NAME ofx_gl_overlay COMMAND wmp_ofx_gl_overlay_test)
     endif()
+
+    add_executable(wmp_render_sheet tools/render_sheet.cpp ofx/tests/mock_host.cpp)
+    target_include_directories(wmp_render_sheet PRIVATE ofx/third_party/openfx-1.5.1/include)
+    target_link_libraries(wmp_render_sheet PRIVATE wmp_core ${CMAKE_DL_LIBS})
+    add_dependencies(wmp_render_sheet WronMotionPath)
 
     add_executable(wmp_ofx_describe tools/ofx_describe.cpp ofx/tests/mock_host.cpp)
     target_include_directories(wmp_ofx_describe PRIVATE ofx/third_party/openfx-1.5.1/include)

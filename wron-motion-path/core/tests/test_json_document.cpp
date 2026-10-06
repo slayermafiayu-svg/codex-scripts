@@ -7,9 +7,12 @@
 
 using namespace wmp;
 
+// Kept outside the CHECK macro: MSVC mis-parses raw string literals inside macro arguments.
+static const char* kEscapes = R"({"a":[1,2.5,-3e-2,true,false,null],"s":"x\"y\\z\n\u00e7\ud83d\ude00"})";
+
 TEST(json_roundtrip_and_escapes) {
     json::Value v;
-    CHECK(json::parse(R"({"a":[1,2.5,-3e-2,true,false,null],"s":"x\"y\\z\n\u00e7\ud83d\ude00"})", v));
+    CHECK(json::parse(kEscapes, v));
     CHECK(v.isObject());
     const json::Value* s = v.find("s");
     CHECK(s && s->isString());
