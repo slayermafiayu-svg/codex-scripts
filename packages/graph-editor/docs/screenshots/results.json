@@ -1,0 +1,157 @@
+[
+  {
+    "name": "initial document loaded with sample keys",
+    "ok": true,
+    "detail": "22 keys"
+  },
+  {
+    "name": "dragged key snapped to a whole frame",
+    "ok": true,
+    "detail": "t=1.86667 (56.000 f)"
+  },
+  {
+    "name": "drag moved the key in time and value",
+    "ok": true,
+    "detail": "t=1.867 v=372.00"
+  },
+  {
+    "name": "drag did not add keys",
+    "ok": true,
+    "detail": "22 keys"
+  },
+  {
+    "name": "one drag = one undo entry",
+    "ok": true,
+    "detail": "1"
+  },
+  {
+    "name": "undo restored the key",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "redo re-applied the move",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "box select from empty space selected multiple keys across channels",
+    "ok": true,
+    "detail": "3 keys"
+  },
+  {
+    "name": "group move applied the same frame delta to every selected key",
+    "ok": true,
+    "detail": "Δ=14.000 f"
+  },
+  {
+    "name": "double-click inserted exactly one key",
+    "ok": true,
+    "detail": "5 -> 6"
+  },
+  {
+    "name": "inserted key did not change the curve",
+    "ok": true,
+    "detail": "max diff 4.26e-14"
+  },
+  {
+    "name": "inserted key is selected",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "handle drag changed the outgoing tangent",
+    "ok": true,
+    "detail": "tangents=unified"
+  },
+  {
+    "name": "unified tangents stay collinear",
+    "ok": true,
+    "detail": "680.219 vs 680.219"
+  },
+  {
+    "name": "clicking a curve selects that segment (no select mode needed)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "easing applied to the last incoming segment only",
+    "ok": true,
+    "detail": "out 0.420 in 0.420"
+  },
+  {
+    "name": "middle key incoming handle untouched by easing of its outgoing segment",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Delete inside a text field does not delete the key",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "typing a frame number in the inspector moves the key",
+    "ok": true,
+    "detail": "t=2.5"
+  },
+  {
+    "name": "invalid input is flagged and does not change the key",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "comma decimal input accepted",
+    "ok": true,
+    "detail": "v=12.5"
+  },
+  {
+    "name": "blocked collision stops one frame before the occupied frame",
+    "ok": true,
+    "detail": "t=2.4667"
+  },
+  {
+    "name": "wheel zoom keeps the time under the cursor",
+    "ok": true,
+    "detail": "3.7240 -> 3.7240, 268.1 px/s"
+  },
+  {
+    "name": "speed mode active",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "29.97 drag snaps to exact 30000/1001 frames",
+    "ok": true,
+    "detail": "frame 54.000000"
+  },
+  {
+    "name": "narrow dock keeps the plot area usable (>= 45% of height)",
+    "ok": true,
+    "detail": "175px of 300px, size=\"narrow tiny short\""
+  },
+  {
+    "name": "narrow dock does not overflow the panel horizontally",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "strip layout hides inset and navigator",
+    "ok": true,
+    "detail": "size=\"short micro\""
+  },
+  {
+    "name": "locale switch relabels the UI",
+    "ok": true,
+    "detail": "Değer"
+  },
+  {
+    "name": "no re-render while idle",
+    "ok": true,
+    "detail": "0 renders in 600 ms"
+  },
+  {
+    "name": "no console errors or page errors",
+    "ok": true,
+    "detail": ""
+  }
+]

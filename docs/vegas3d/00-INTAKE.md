@@ -78,3 +78,13 @@ renderer kontrolleri için gerekir.
 4. Temel akış: nesne oluştur → seç → düzenle → animasyon → kaydet → tekrar aç
    (mock host ile), lisans ve eski kayıt uyumluluğu korunarak.
 5. Rapor: değişiklikler, çalıştırılan kontroller, kalan sorunlar, sonraki aşama.
+
+## 5. Ara teslim: Graph / Value editörü bileşeni (bağımsız UI)
+
+Kullanıcı isteğiyle, ürün kaynakları beklenirken timeline'ın en kritik parçası
+olan graph editörü bağımsız bir bileşen olarak `packages/graph-editor/` altında
+hazırlandı. Bu bir demo değil, gömülebilir bileşendir: rational FPS zaman
+modeli, `[S, E)` sınır kuralı, kare snapping, çakışma politikası, de Casteljau
+ile hareketi bozmayan keyframe ekleme, segment hedefli easing, undo/redo
+işlemleri, dar panel düzeni. Durum: **uygulandı ve tarayıcıda test edildi**
+(29 birim testi, 31 Chromium etkileşim kontrolü). VEGAS içinde doğrulanmadı.
