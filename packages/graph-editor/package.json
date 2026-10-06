@@ -1,0 +1,20 @@
+{
+  "name": "@vegas3d/graph-editor",
+  "version": "0.1.0",
+  "description": "Keyframe graph / value curve editor UI component (framework-agnostic, no build step).",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": "./src/index.js",
+    "./theme.css": "./src/view/theme.css"
+  },
+  "files": ["src", "types", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "demo": "npx http-server -p 8787 -c-1 .",
+    "verify:browser": "node scripts/verify-browser.mjs"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

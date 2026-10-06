@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph Editor Demo</title>
+<link rel="stylesheet" href="../src/view/theme.css">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d12; color: #d6dbe5; font: 13px/1.4 Inter, system-ui, sans-serif; }
+  .page { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #1e232c; background: #0f1218; }
+  .bar label { display: inline-flex; align-items: center; gap: 4px; color: #8e97a6; }
+  .bar select, .bar button { font: inherit; background: #1b2028; color: #e7eaf0; border: 1px solid #2a313d; border-radius: 5px; padding: 3px 8px; }
+  .bar button:hover { background: #262c37; }
+  .frame { display: grid; place-items: center; padding: 12px; min-height: 0; }
+  #host { width: 100%; height: 100%; max-width: 100%; transition: width 160ms cubic-bezier(.2,0,0,1), height 160ms cubic-bezier(.2,0,0,1); }
+  #host.size-dock { width: 420px; height: 300px; }
+  #host.size-dock-tall { width: 380px; height: 560px; }
+  #host.size-strip { width: 900px; height: 180px; }
+  #host.size-wide { width: 100%; height: 100%; }
+  .log { height: 110px; overflow: auto; margin: 0; padding: 6px 12px; border-top: 1px solid #1e232c; background: #0f1218; font: 11px/1.5 ui-monospace, Menlo, monospace; color: #8e97a6; }
+  .log b { color: #58b4ff; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="bar">
+    <label>Size
+      <select id="size">
+        <option value="size-wide">Wide (fill)</option>
+        <option value="size-dock">Narrow dock 420×300</option>
+        <option value="size-dock-tall">Narrow tall 380×560</option>
+        <option value="size-strip">Strip 900×180</option>
+      </select>
+    </label>
+    <label>FPS
+      <select id="fps">
+        <option value="30/1">30</option>
+        <option value="30000/1001">29.97 (30000/1001)</option>
+        <option value="24000/1001">23.976 (24000/1001)</option>
+        <option value="25/1">25</option>
+        <option value="60000/1001">59.94 (60000/1001)</option>
+      </select>
+    </label>
+    <label>Theme
+      <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select>
+    </label>
+    <label>Language
+      <select id="locale"><option value="en">English</option><option value="tr">Türkçe</option></select>
+    </label>
+    <label>Collision
+      <select id="collision"><option value="block">Block</option><option value="replace">Replace</option></select>
+    </label>
+    <button id="reset">Reset document</button>
+    <button id="export">Export JSON to console</button>
+    <span id="ph" style="margin-left:auto;color:#8e97a6;font-family:ui-monospace,monospace"></span>
+  </div>
+  <div class="frame"><div id="host" class="size-wide"></div></div>
+  <pre class="log" id="log"></pre>
+</div>
+<script type="module">
+  import { createGraphEditor } from '../src/index.js';
+  import { sampleDocument } from './sample-data.js';
+
+  const host = document.getElementById('host');
+  const log = document.getElementById('log');
+  const ph = document.getElementById('ph');
+  const addLog = (type, text) => {
+    const line = document.createElement('div');
+    line.innerHTML = `<b>${type}</b> ${text}`;
+    log.prepend(line);
+    while (log.children.length > 60) log.lastChild.remove();
+  };
+
+  const editor = createGraphEditor(host, {
+    document: sampleDocument(),
+    locale: 'en',
+    theme: 'dark',
+    playhead: 1.5,
+  });
+  window.editor = editor;
+
+  editor.on('change', (e) => addLog('change', `${e.label} (${e.kind}) · keys: ${e.document.channels.reduce((n, c) => n + c.keys.length, 0)}`));
+  editor.on('selection', (e) => addLog('selection', `${e.keys.length} keys${e.segment ? ' · segment' : ''}`));
+  editor.on('playhead', (e) => { ph.textContent = `playhead ${e.time.toFixed(4)} s (${e.source})`; });
+  ph.textContent = `playhead ${editor.getPlayhead().toFixed(4)} s`;
+
+  document.getElementById('size').addEventListener('change', (e) => {
+    host.className = e.target.value;
+  });
+  document.getElementById('fps').addEventListener('change', (e) => {
+    const [num, den] = e.target.value.split('/').map(Number);
+    editor.setDocument(sampleDocument(num, den));
+  });
+  document.getElementById('theme').addEventListener('change', (e) => editor.setTheme(e.target.value));
+  document.getElementById('locale').addEventListener('change', (e) => editor.setLocale(e.target.value));
+  document.getElementById('collision').addEventListener('change', (e) => editor.setOption('collision', e.target.value));
+  document.getElementById('reset').addEventListener('click', () => editor.setDocument(sampleDocument()));
+  document.getElementById('export').addEventListener('click', () => console.log(JSON.stringify(editor.getDocument(), null, 2)));
+</script>
+</body>
+</html>
