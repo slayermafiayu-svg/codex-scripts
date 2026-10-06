@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wron Motion Path — editor dev harness</title>
+<link rel="stylesheet" href="../src/view/theme.css">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0c0f; color: #cfd5de; font: 12px system-ui, sans-serif; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #262a31; }
+  .bar select, .bar button, .bar input { font: inherit; }
+  #dock { resize: both; overflow: hidden; width: min(1100px, 96vw); height: 640px; margin: 10px; border: 1px solid #333944; }
+  #log { margin: 0 10px 10px; max-height: 120px; overflow: auto; color: #8f99a8; white-space: pre-wrap; }
+  .warn { color: #ffd27a; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <strong class="warn">Developer harness · mock host (MemoryHostAdapter) · NOT connected to VEGAS</strong>
+  <label>Language <select id="lang"></select></label>
+  <label>Theme <select id="theme"><option>dark</option><option>light</option></select></label>
+  <label>Dock <select id="size">
+    <option value="1100x640">1100×640</option><option value="760x480">760×480</option><option value="420x300">420×300</option>
+    <option value="360x240">360×240</option><option value="320x180">320×180</option><option value="900x180">900×180</option></select></label>
+  <button id="hostUndo" type="button">Simulate host-side change</button>
+</div>
+<div id="dock"></div>
+<pre id="log"></pre>
+<script type="module">
+  import { createPathEditor, MemoryHostAdapter, LOCALES, documentFormat, presets } from '../src/index.js';
+
+  // A synthetic still frame so the editor has something to draw over.
+  const still = document.createElement('canvas');
+  still.width = 960; still.height = 540;
+  const g = still.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 960, 540);
+  grad.addColorStop(0, '#24324a'); grad.addColorStop(1, '#4a2b3d');
+  g.fillStyle = grad; g.fillRect(0, 0, 960, 540);
+  g.fillStyle = 'rgba(255,255,255,.08)';
+  for (let i = 0; i < 12; i++) g.fillRect(i * 80, 0, 40, 540);
+  g.fillStyle = 'rgba(255,255,255,.35)'; g.font = '28px system-ui'; g.fillText('Event frame (synthetic)', 30, 50);
+
+  const initial = documentFormat.saveDocument(documentFormat.makeDocument(presets.makePreset('s-curve', 16 / 9)));
+  const host = new MemoryHostAdapter({ width: 1920, height: 1080, eventDuration: 5, pathData: initial, frameImage: still,
+    keyframes: { wmpProgress: [{ t: 0, v: 0, interp: 'linear' }, { t: 5, v: 1, interp: 'linear' }] } });
+  window.wmpHost = host;
+  const params = new URLSearchParams(location.search);
+  const editor = createPathEditor(document.getElementById('dock'), { host, locale: params.get('lang') || 'en', theme: params.get('theme') || 'dark', dev: true });
+  window.wmpEditor = editor;
+  const log = document.getElementById('log');
+  editor.on('change', (e) => { log.textContent = `${new Date().toLocaleTimeString()} write "${e.label}" (${e.document.path.points.length} points)\n` + log.textContent; });
+  const lang = document.getElementById('lang');
+  for (const l of LOCALES) lang.append(new Option(l, l));
+  lang.value = params.get('lang') || 'en';
+  lang.onchange = () => editor.setLocale(lang.value);
+  const theme = document.getElementById('theme');
+  theme.value = params.get('theme') || 'dark';
+  theme.onchange = (e) => editor.setTheme(e.target.value);
+  document.getElementById('size').onchange = (e) => {
+    const [w, h] = e.target.value.split('x');
+    const dock = document.getElementById('dock');
+    dock.style.width = `${w}px`; dock.style.height = `${h}px`;
+  };
+  document.getElementById('hostUndo').onclick = () => host.emitExternalPathChange(documentFormat.saveDocument(documentFormat.makeDocument(presets.makePreset('zigzag', 16 / 9))));
+</script>
+</body>
+</html>

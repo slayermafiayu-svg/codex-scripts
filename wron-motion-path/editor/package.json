@@ -1,0 +1,14 @@
+{
+  "name": "@wronsvp/motion-path-editor",
+  "version": "0.1.0-dev",
+  "private": true,
+  "description": "Wron Motion Path editor component (framework-agnostic ES modules). Developer build: not integrated with the Wron Main Panel yet.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "verify:browser": "node scripts/verify-browser.mjs",
+    "demo": "python3 -m http.server 8765 --directory .."
+  },
+  "license": "UNLICENSED"
+}
