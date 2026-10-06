@@ -42,6 +42,11 @@ add_library(wmp_core STATIC
   core/src/geometry.cpp
   core/src/timing.cpp
   core/src/motion.cpp
+  core/src/render.cpp
+  core/src/pipeline.cpp
+  core/src/presets.cpp
+  core/src/retime.cpp
+  core/src/cache.cpp
 )
 target_include_directories(wmp_core PUBLIC core/include)
 find_package(Threads REQUIRED)
@@ -55,7 +60,12 @@ if(WMP_BUILD_TESTS)
     core/tests/test_json_document.cpp
     core/tests/test_geometry.cpp
     core/tests/test_timing_motion.cpp
+    core/tests/test_render.cpp
+    core/tests/test_presets_retime_cache.cpp
   )
   target_link_libraries(wmp_core_tests PRIVATE wmp_core)
   add_test(NAME core COMMAND wmp_core_tests)
+
+  add_executable(wmp_bench tools/bench_render.cpp)
+  target_link_libraries(wmp_bench PRIVATE wmp_core)
 endif()
