@@ -7,17 +7,18 @@
   follow their keyframed positions - the same idea as the puppet tools in
   other applications.
 
-  How the pins work
-  -----------------
+  The effect has two parts, chosen with the "Mode" parameter
+  ------------------------------------------------------------
+    1 - Mesh:    the surface is detected and covered with triangles, which are
+                 drawn on the picture together with the pins. Only the mesh
+                 settings are shown. Moving a pin sticks it onto the picture.
+    2 - Animate: the mesh is hidden (and so are its settings). Moving a pin
+                 bends the picture; keyframe the pin positions to animate.
+
   Every pin has a visible, keyframable "Position" (a 2D point parameter, so
   VEGAS shows its cross-hair in the video preview) and a hidden "Anchor" that
-  records where the pin is stuck to the picture.
-
-    * While "Setup Mode" is on, the picture is not deformed and moving a pin
-      moves its anchor with it: you are sticking pins onto the image.
-    * With "Setup Mode" off, moving a pin drags the image.
-    * Enabling a pin anchors it where it currently is, so adding a pin never
-      makes the image jump.
+  records where the pin is stuck to the picture. Enabling a pin anchors it
+  where it currently is, so adding a pin never makes the image jump.
 
   On hosts that support OFX overlays (VEGAS does on video events) the plug-in
   also draws the pins and the mesh over the preview: click on the picture to
@@ -80,8 +81,8 @@ using puppet::Vec2;
 #define kPluginDescription                                                                   \
   "Puppet-style mesh warp. The picture (or the opaque part of it) is covered with a "      \
   "triangle mesh that bends as rigidly as possible so that every pin follows its "         \
-  "Position. Turn on Setup Mode, enable pins and place them on the picture; then turn "    \
-  "Setup Mode off and move or keyframe the pins to animate."
+  "Position. Mode 1 - Mesh: place the pins on the picture. Mode 2 - Animate: move or "     \
+  "keyframe the pins to bend it."
 
 // VEGAS extensions (values from the Sony/MAGIX OFX extension header).
 #define kVegasPropPixelOrder "OfxImageEffectPropPixelOrder"
@@ -93,20 +94,32 @@ using puppet::Vec2;
 static const int kNumPins = 20;
 
 // Parameter names (also what VEGAS scripts see through OFXEffect.FindParameterByName).
-#define kParamSetup "setupMode"
-#define kParamResetAll "resetAllPins"
+#define kParamMode "mode"
 #define kParamGroupMesh "meshGroup"
 #define kParamMeshArea "meshArea"
 #define kParamAlphaThreshold "alphaThreshold"
 #define kParamDensity "meshDensity"
 #define kParamExpansion "expansion"
+#define kParamGroupAnimate "animateGroup"
 #define kParamIterations "rigidity"
-#define kParamGroupDisplay "displayGroup"
+#define kParamShowPins "animatePins"
 #define kParamOverlayMesh "overlayMesh"
+#define kParamResetAll "resetAllPins"
+#define kParamGroupDisplay "displayGroup"
 #define kParamBurnOverlay "burnOverlay"
 #define kParamFlipY "invertPinY"
 
+// The effect works in two parts: first the mesh is built and the pins are
+// stuck onto the picture, then the pins are animated to bend the picture.
+enum { kModeMesh = 0, kModeAnimate = 1 };
 enum { kMeshAreaAlpha = 0, kMeshAreaWholeFrame = 1 };
+enum { kShowPinsAuto = 0, kShowPinsAlways = 1, kShowPinsNever = 2 };
+
+// VEGAS render quality (render arguments). Draft/Preview are only used by the
+// preview window, so pins drawn into the picture then never reach a render.
+#define kVegasRenderQuality "OfxImageEffectPropRenderQuality"
+#define kVegasRenderQualityDraft "OfxImageEffectPropRenderQualityDraft"
+#define kVegasRenderQualityPreview "OfxImageEffectPropRenderQualityPreview"
 
 static std::string pinParamName(int k, const char* suffix) {
   char buf[32];
@@ -183,9 +196,10 @@ struct Instance {
   OfxImageEffectHandle effect = nullptr;
   OfxParamSetHandle paramSet = nullptr;
   OfxImageClipHandle srcClip = nullptr, dstClip = nullptr;
-  OfxParamHandle setup = nullptr, resetAll = nullptr, meshArea = nullptr, alphaThreshold = nullptr,
-                 density = nullptr, expansion = nullptr, iterations = nullptr, overlayMesh = nullptr,
-                 burnOverlay = nullptr, flipY = nullptr;
+  OfxParamHandle mode = nullptr, meshGroup = nullptr, meshArea = nullptr, alphaThreshold = nullptr,
+                 density = nullptr, expansion = nullptr, animateGroup = nullptr, iterations = nullptr,
+                 showPins = nullptr, overlayMesh = nullptr, resetAll = nullptr, burnOverlay = nullptr,
+                 flipY = nullptr;
   OfxParamHandle pinOn[kNumPins] = {}, pinPos[kNumPins] = {}, pinAnchor[kNumPins] = {},
                  pinReset[kNumPins] = {};
 
@@ -312,13 +326,14 @@ struct PinValues {
 };
 
 struct Settings {
-  bool setup = true;
+  bool setup = true;  // Mesh part (pins are being placed); false = Animate part
   int meshArea = kMeshAreaAlpha;
   double alphaThreshold = 0.05;
   int density = 48;
   double expansion = 3.0;
   int iterations = 20;
-  bool overlayMesh = true;
+  int showPins = kShowPinsAuto;
+  bool overlayMesh = false;
   bool burnOverlay = false;
   bool flipY = false;
   PinValues pins[kNumPins];
@@ -326,13 +341,14 @@ struct Settings {
 
 static Settings readSettings(Instance* inst, double t) {
   Settings s;
-  s.setup = getBool(inst->setup, t, true);
+  s.setup = getInt(inst->mode, t, kModeMesh) != kModeAnimate;
   s.meshArea = getInt(inst->meshArea, t, kMeshAreaAlpha);
   s.alphaThreshold = std::max(0.0, std::min(1.0, getDouble(inst->alphaThreshold, t, 0.05)));
   s.density = std::max(4, std::min(400, getInt(inst->density, t, 48)));
   s.expansion = std::max(0.0, std::min(1000.0, getDouble(inst->expansion, t, 3.0)));
   s.iterations = std::max(0, std::min(200, getInt(inst->iterations, t, 20)));
-  s.overlayMesh = getBool(inst->overlayMesh, t, true);
+  s.showPins = getInt(inst->showPins, t, kShowPinsAuto);
+  s.overlayMesh = getBool(inst->overlayMesh, t, false);
   s.burnOverlay = getBool(inst->burnOverlay, t, false);
   s.flipY = getBool(inst->flipY, t, false);
   for (int k = 0; k < kNumPins; ++k) {
@@ -355,11 +371,29 @@ static bool anyPinDisplaced(const Settings& s) {
   return false;
 }
 
-// Burned-in overlay: while setting up, the mesh (the detected surface) and
-// the pins are drawn into the picture so they are visible whatever the host
-// can draw; afterwards only if the user asks for it.
+// Is this render for the preview window (1), a final render (0) or unknown (-1)?
+static int previewState(OfxPropertySetHandle inArgs) {
+  const std::string q = propString(inArgs, kVegasRenderQuality, 0);
+  if (!q.empty()) return (q == kVegasRenderQualityDraft || q == kVegasRenderQualityPreview) ? 1 : 0;
+  const int interactive = propInt(inArgs, kOfxImageEffectPropInteractiveRenderStatus, 0, -1);
+  return interactive < 0 ? -1 : (interactive ? 1 : 0);
+}
+
+// What is drawn into the picture itself (so it is visible whatever the host
+// can draw on its preview):
+//  * Mesh part: the mesh (the detected surface) and the pins.
+//  * Animate part: no mesh; the pins only in preview renders (Auto), always,
+//    or never - so they can be seen and dragged but stay out of the render.
 static bool burnsMesh(const Settings& s) { return s.setup || s.burnOverlay; }
-static bool burnsPins(const Settings& s) { return s.setup || s.burnOverlay; }
+static bool burnsPins(const Settings& s, int preview) {
+  if (s.setup || s.burnOverlay || s.showPins == kShowPinsAlways) return true;
+  return s.showPins == kShowPinsAuto && preview == 1;
+}
+// For isIdentity, where the render quality may not be known yet.
+static bool mayBurnPins(const Settings& s, int preview) {
+  if (burnsPins(s, preview)) return true;
+  return s.showPins == kShowPinsAuto && preview < 0;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Images
@@ -702,14 +736,14 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
   ParamDefiner d;
   if (gEffect->getParamSet(effect, &d.ps) != kOfxStatOK) return kOfxStatFailed;
 
-  d.boolean(kParamSetup, "Setup Mode (place pins)",
-            "On: the picture is shown undeformed with its mesh, and moving a pin sticks it to a new "
-            "spot on the picture. Off: moving a pin bends the picture.",
-            true, nullptr);
-  d.button(kParamResetAll, "Reset All Pins",
-           "Moves every enabled pin back onto its anchor (undoes the deformation at this frame).", nullptr);
+  d.choice(kParamMode, "Mode",
+           "1 - Mesh: the surface is detected and covered with triangles (shown on the picture); "
+           "place the pins on the picture. 2 - Animate: the mesh is hidden and moving the pins bends "
+           "the picture - keyframe the pin positions to animate.",
+           {"1 - Mesh (place pins)", "2 - Animate (bend)"}, kModeMesh, nullptr);
 
-  d.group(kParamGroupMesh, "Mesh", true, "How the surface is detected and triangulated.");
+  // Part 1: mesh settings (only shown in Mesh mode)
+  d.group(kParamGroupMesh, "Mesh Settings", true, "How the surface is detected and triangulated.");
   d.choice(kParamMeshArea, "Mesh Area",
            "Alpha: only the opaque part of the picture is meshed (a cut-out character, a logo...). "
            "Whole frame: the entire frame is meshed.",
@@ -724,17 +758,27 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
   d.real(kParamExpansion, "Expansion",
          "Grows the detected shape by this many pixels so soft edges stay inside the mesh.", 3.0, 0.0,
          200.0, 0.0, 30.0, 1.0, 1, kParamGroupMesh);
+
+  // Part 2: animate settings (only shown in Animate mode)
+  d.group(kParamGroupAnimate, "Animate Settings", true, "How the picture bends.");
   d.integer(kParamIterations, "Rigidity",
             "Solver iterations. More keeps the picture stiffer and bends more naturally; fewer is "
             "faster and softer.",
-            20, 0, 200, 1, 60, kParamGroupMesh);
+            20, 0, 200, 1, 60, kParamGroupAnimate);
+  d.choice(kParamShowPins, "Show Pins",
+           "Pins drawn into the picture while animating. Auto: only in the preview window at Draft or "
+           "Preview quality, never in a render. Always: also in renders. Never: not drawn.",
+           {"Auto (preview only)", "Always", "Never"}, kShowPinsAuto, kParamGroupAnimate);
+  d.boolean(kParamOverlayMesh, "Show Mesh On Overlay",
+            "Also draw the bent mesh on the preview overlay (never rendered).", false, kParamGroupAnimate);
+  d.button(kParamResetAll, "Reset All Pins",
+           "Moves every enabled pin back onto its anchor (undoes the bend at this frame).",
+           kParamGroupAnimate);
 
   d.group(kParamGroupDisplay, "Display", false, "Overlay options.");
-  d.boolean(kParamOverlayMesh, "Show Mesh On Preview",
-            "Draw the deformed mesh in the preview overlay (never rendered).", true, kParamGroupDisplay);
   d.boolean(kParamBurnOverlay, "Draw Mesh & Pins Into Video",
-            "Draws the mesh and numbered pins into the picture itself, in every mode. Use it when the "
-            "preview overlay is not available. Remember to turn it off before the final render.",
+            "Draws the mesh and numbered pins into the picture itself, in both modes and in renders. "
+            "Use it only to check the mesh; turn it off before the final render.",
             false, kParamGroupDisplay);
   d.boolean(kParamFlipY, "Invert Pin Y Axis",
             "Only needed if a host shows the pin cross-hairs upside down compared to the picture.",
@@ -751,8 +795,8 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
               "Turns the pin on. A pin is stuck to the picture where it is when you enable it.", false,
               grp.c_str());
     d.point(pinParamName(k, "_pos"), "Position",
-            "Where the pin is. In Setup Mode this also sticks the pin to the picture; otherwise it drags "
-            "the picture. Animate it to animate the puppet.",
+            "Where the pin is. In Mesh mode this sticks the pin to the picture; in Animate mode it "
+            "drags the picture. Keyframe it to animate the puppet.",
             u, v, grp.c_str(), true, false);
     d.button(pinParamName(k, "_reset"), "Reset Position",
              "Moves the pin back onto its anchor at the current frame.", grp.c_str());
@@ -767,9 +811,29 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
   return kOfxStatOK;
 }
 
+// Shows or hides a parameter in the host UI (only touches it if it changes).
+static void setParamVisible(OfxParamHandle h, bool visible) {
+  OfxPropertySetHandle p = nullptr;
+  if (!h || gParam->paramGetPropertySet(h, &p) != kOfxStatOK || !p) return;
+  if ((propInt(p, kOfxParamPropSecret, 0, 0) != 0) == visible) gProp->propSetInt(p, kOfxParamPropSecret, 0, visible ? 0 : 1);
+  if ((propInt(p, kOfxParamPropEnabled, 0, 1) != 0) != visible) gProp->propSetInt(p, kOfxParamPropEnabled, 0, visible ? 1 : 0);
+}
+
+// The two parts of the effect show their own settings only: mesh settings in
+// Mesh mode, animation settings (and the per-pin reset buttons) in Animate mode.
+static void applyModeVisibility(Instance* inst, bool meshMode) {
+  const OfxParamHandle meshParams[] = {inst->meshGroup, inst->meshArea, inst->alphaThreshold, inst->density,
+                                       inst->expansion};
+  const OfxParamHandle animParams[] = {inst->animateGroup, inst->iterations, inst->showPins, inst->overlayMesh,
+                                       inst->resetAll};
+  for (OfxParamHandle h : meshParams) setParamVisible(h, meshMode);
+  for (OfxParamHandle h : animParams) setParamVisible(h, !meshMode);
+  for (int k = 0; k < kNumPins; ++k) setParamVisible(inst->pinReset[k], !meshMode);
+}
+
 static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
-  // Only fetch handles here: VEGAS does not allow edit blocks or value changes
-  // inside createInstance.
+  // Only fetch handles and adjust parameter visibility here: VEGAS does not
+  // allow edit blocks or value changes inside createInstance.
   Instance* inst = new Instance();
   inst->effect = effect;
   gEffect->getParamSet(effect, &inst->paramSet);
@@ -778,14 +842,17 @@ static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
   if (gEffect->clipGetHandle(effect, kOfxImageEffectOutputClipName, &inst->dstClip, nullptr) != kOfxStatOK)
     inst->dstClip = nullptr;
   OfxParamSetHandle ps = inst->paramSet;
-  inst->setup = fetchParam(ps, kParamSetup);
-  inst->resetAll = fetchParam(ps, kParamResetAll);
+  inst->mode = fetchParam(ps, kParamMode);
+  inst->meshGroup = fetchParam(ps, kParamGroupMesh);
   inst->meshArea = fetchParam(ps, kParamMeshArea);
   inst->alphaThreshold = fetchParam(ps, kParamAlphaThreshold);
   inst->density = fetchParam(ps, kParamDensity);
   inst->expansion = fetchParam(ps, kParamExpansion);
+  inst->animateGroup = fetchParam(ps, kParamGroupAnimate);
   inst->iterations = fetchParam(ps, kParamIterations);
+  inst->showPins = fetchParam(ps, kParamShowPins);
   inst->overlayMesh = fetchParam(ps, kParamOverlayMesh);
+  inst->resetAll = fetchParam(ps, kParamResetAll);
   inst->burnOverlay = fetchParam(ps, kParamBurnOverlay);
   inst->flipY = fetchParam(ps, kParamFlipY);
   for (int k = 0; k < kNumPins; ++k) {
@@ -800,6 +867,8 @@ static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
     delete inst;
     return kOfxStatFailed;
   }
+  // show the settings of the part the (possibly loaded) effect is in
+  applyModeVisibility(inst, getInt(inst->mode, 0.0, kModeMesh) != kModeAnimate);
   return kOfxStatOK;
 }
 
@@ -834,6 +903,10 @@ static OfxStatus actionInstanceChanged(OfxImageEffectHandle effect, OfxPropertyS
   const std::string name = propString(inArgs, kOfxPropName, 0);
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
 
+  if (name == kParamMode) {
+    applyModeVisibility(inst, getInt(inst->mode, t, kModeMesh) != kModeAnimate);
+    return kOfxStatOK;
+  }
   if (name == kParamResetAll) {
     gParam->paramEditBegin(inst->paramSet, "Reset All Pins");
     for (int k = 0; k < kNumPins; ++k)
@@ -849,7 +922,8 @@ static OfxStatus actionInstanceChanged(OfxImageEffectHandle effect, OfxPropertyS
     return kOfxStatOK;
   }
   if (suffix == "_pos") {
-    if (getBool(inst->setup, t, true) && getBool(inst->pinOn[k], t, false)) anchorPinHere(inst, k, t);
+    if (getInt(inst->mode, t, kModeMesh) != kModeAnimate && getBool(inst->pinOn[k], t, false))
+      anchorPinHere(inst, k, t);
     return kOfxStatOK;
   }
   if (suffix == "_reset") {
@@ -881,7 +955,8 @@ static OfxStatus actionIsIdentity(OfxImageEffectHandle effect, OfxPropertySetHan
   if (!inst) return kOfxStatReplyDefault;
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
   const Settings s = readSettings(inst, t);
-  if (burnsMesh(s) || burnsPins(s) || (!s.setup && anyPinDisplaced(s))) return kOfxStatReplyDefault;
+  if (burnsMesh(s) || mayBurnPins(s, previewState(inArgs)) || (!s.setup && anyPinDisplaced(s)))
+    return kOfxStatReplyDefault;
   gProp->propSetString(outArgs, kOfxPropName, 0, kOfxImageEffectSimpleSourceClipName);
   gProp->propSetDouble(outArgs, kOfxPropTime, 0, t);
   return kOfxStatOK;
@@ -929,7 +1004,8 @@ static OfxStatus actionRender(OfxImageEffectHandle effect, OfxPropertySetHandle 
   const Settings s = readSettings(inst, t);
   const Geometry g = makeGeometry(inst, t, rsx, rsy, s.flipY);
   const bool deform = !s.setup && anyPinDisplaced(s);
-  const bool needMesh = deform || burnsMesh(s) || burnsPins(s) || gHostSupportsOverlays;
+  const bool pinsBurned = burnsPins(s, previewState(inArgs));
+  const bool needMesh = deform || burnsMesh(s) || pinsBurned || gHostSupportsOverlays;
 
   PuppetResult r;
   if (needMesh) computePuppet(s, g, src, deform, r);
@@ -948,13 +1024,13 @@ static OfxStatus actionRender(OfxImageEffectHandle effect, OfxPropertySetHandle 
   }
   runBands(job);
 
-  if (burnsMesh(s) || burnsPins(s)) {
+  if (burnsMesh(s) || pinsBurned) {
     dst.straightAlpha = src.straightAlpha;
     dst.bgra = src.bgra || dst.bgra;
     puppet::Painter paint(dst, window);
     const double scale = std::max(0.25, std::min(rsx, rsy));
     if (burnsMesh(s) && r.meshOk) puppet::drawMesh(paint, r.mesh, r.deformed, s.setup ? 0.75f : 0.6f);
-    if (burnsPins(s)) {
+    if (pinsBurned) {
       std::vector<puppet::OverlayPin> pins;
       for (int k = 0; k < kNumPins; ++k) {
         const PinValues& p = s.pins[k];

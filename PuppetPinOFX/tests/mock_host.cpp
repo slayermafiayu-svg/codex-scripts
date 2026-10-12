@@ -793,7 +793,13 @@ static void setupInstanceEffect(Effect& desc, Effect& fx, double projW, double p
   }
 }
 
-static OfxStatus render(Effect& fx, double t, double rs, const char* field = kOfxImageFieldNone) {
+#define kQuality "OfxImageEffectPropRenderQuality"
+#define kQualityPreview "OfxImageEffectPropRenderQualityPreview"
+#define kQualityBest "OfxImageEffectPropRenderQualityBest"
+
+// quality: like VEGAS, Preview for the preview window, Best for a final render.
+static OfxStatus render(Effect& fx, double t, double rs, const char* quality = kQualityBest,
+                        const char* field = kOfxImageFieldNone) {
   Clip* dst = fx.clips[kOfxImageEffectOutputClipName].get();
   PropSet in;
   in.setD(kOfxPropTime, t);
@@ -804,8 +810,10 @@ static OfxStatus render(Effect& fx, double t, double rs, const char* field = kOf
   in.setI(kOfxImageEffectPropRenderWindow, dst->image->y2, 3);
   in.setD(kOfxImageEffectPropRenderScale, rs, 0);
   in.setD(kOfxImageEffectPropRenderScale, rs, 1);
-  in.setI(kOfxImageEffectPropSequentialRenderStatus, 0);
-  in.setI(kOfxImageEffectPropInteractiveRenderStatus, 1);
+  in.setS(kQuality, quality);
+  const bool preview = std::strcmp(quality, kQualityPreview) == 0;
+  in.setI(kOfxImageEffectPropSequentialRenderStatus, preview ? 0 : 1);
+  in.setI(kOfxImageEffectPropInteractiveRenderStatus, preview ? 1 : 0);
   call(kOfxImageEffectActionBeginSequenceRender, &fx, &in);
   const OfxStatus s = call(kOfxImageEffectActionRender, &fx, &in);
   call(kOfxImageEffectActionEndSequenceRender, &fx, &in);
@@ -813,9 +821,10 @@ static OfxStatus render(Effect& fx, double t, double rs, const char* field = kOf
   return s;
 }
 
-static bool isIdentity(Effect& fx, double t) {
+static bool isIdentity(Effect& fx, double t, const char* quality = nullptr) {
   PropSet in, out;
   in.setD(kOfxPropTime, t);
+  if (quality) in.setS(kQuality, quality);
   in.setS(kOfxImageEffectPropFieldToRender, kOfxImageFieldNone);
   in.setI(kOfxImageEffectPropRenderWindow, 0, 0);
   in.setI(kOfxImageEffectPropRenderWindow, 0, 1);
@@ -947,8 +956,18 @@ int main(int argc, char** argv) {
   fx.clips[kOfxImageEffectOutputClipName]->image = &dst;
   if (!outDir.empty()) writePPM(src, outDir + "/0_source.ppm");
 
-  std::printf("setup mode render (mesh burned in)\n");
-  CHECK(valueOf(fx, "setupMode")[0] == 1.0);
+  auto isSecret = [&](const char* name) { return param(fx, name)->props.getI(kOfxParamPropSecret, 0, 0) != 0; };
+  auto isEnabled = [&](const char* name) { return param(fx, name)->props.getI(kOfxParamPropEnabled, 0, 1) != 0; };
+
+  std::printf("part 1 - mesh mode: only mesh settings are shown\n");
+  CHECK(valueOf(fx, "mode")[0] == 0.0);
+  for (const char* n : {"meshGroup", "meshArea", "alphaThreshold", "meshDensity", "expansion"})
+    CHECK(!isSecret(n) && isEnabled(n));
+  for (const char* n : {"animateGroup", "rigidity", "animatePins", "overlayMesh", "resetAllPins", "pin01_reset"})
+    CHECK(isSecret(n) && !isEnabled(n));
+  CHECK(!isSecret("pin01_on") && !isSecret("pin01_pos") && isSecret("pin01_anchor"));
+
+  std::printf("mesh mode render (mesh burned in)\n");
   CHECK(!isIdentity(fx, 0));
   CHECK(render(fx, 0, 1.0) == kOfxStatOK);
   if (!outDir.empty()) writePPM(dst, outDir + (overlays ? "/1_setup.ppm" : "/1_setup_no_overlays.ppm"));
@@ -982,9 +1001,17 @@ int main(int argc, char** argv) {
   CHECK(std::fabs(valueOf(fx, "pin03_anchor")[1] - n3[1]) < 1e-12);
   CHECK(fx.params.editDepth == 0);
 
-  std::printf("leave setup mode: nothing moved yet -> identity\n");
-  userSet(fx, "setupMode", {0});
-  CHECK(isIdentity(fx, 0));
+  std::printf("part 2 - animate mode: mesh settings hidden, animate settings shown\n");
+  userSet(fx, "mode", {1});
+  for (const char* n : {"meshGroup", "meshArea", "alphaThreshold", "meshDensity", "expansion"})
+    CHECK(isSecret(n) && !isEnabled(n));
+  for (const char* n : {"animateGroup", "rigidity", "animatePins", "overlayMesh", "resetAllPins", "pin01_reset"})
+    CHECK(!isSecret(n) && isEnabled(n));
+  CHECK(!isSecret("pin01_pos") && isSecret("pin01_anchor"));
+  // nothing moved yet: a final render is the source, the preview still shows the pins
+  CHECK(isIdentity(fx, 0, kQualityBest));
+  CHECK(!isIdentity(fx, 0, kQualityPreview));
+  CHECK(!isIdentity(fx, 0));  // quality unknown: pins may have to be drawn
 
   std::printf("animate: keyframe pin 3 upwards\n");
   Param* p3 = param(fx, "pin03_pos");
@@ -993,10 +1020,28 @@ int main(int argc, char** argv) {
   instanceChanged(fx, "pin03_pos", 10.0);
   // moving a pin outside setup mode must not move its anchor
   CHECK(std::fabs(valueOf(fx, "pin03_anchor")[0] - n3[0]) < 1e-12);
-  CHECK(isIdentity(fx, 0.0));
-  CHECK(!isIdentity(fx, 10.0));
+  CHECK(isIdentity(fx, 0.0, kQualityBest));
+  CHECK(!isIdentity(fx, 10.0, kQualityBest));
   CHECK(render(fx, 10.0, 1.0) == kOfxStatOK);
   if (!outDir.empty()) writePPM(dst, outDir + "/2_deformed.ppm");
+  {
+    // preview render: same bent picture plus the pins, and no mesh
+    std::vector<unsigned char> finalRender = dst.buf;
+    CHECK(render(fx, 10.0, 1.0, kQualityPreview) == kOfxStatOK);
+    if (!outDir.empty()) writePPM(dst, outDir + "/2_deformed_preview.ppm");
+    int diff = 0;
+    for (size_t i = 0; i < finalRender.size(); i += 4) diff += std::memcmp(&finalRender[i], &dst.buf[i], 4) != 0;
+    std::printf("  preview differs from render in %d pixels (pin markers)\n", diff);
+    CHECK(diff > 100 && diff < 3000);  // three pins, no mesh lines
+    // pin 1 sits on the head: yellow marker (BGRA)
+    const unsigned char* c = dst.at(60, 90);
+    CHECK(c[2] > 200 && c[1] > 170 && c[0] < 80);
+    userSet(fx, "animatePins", {2});  // Never
+    CHECK(render(fx, 10.0, 1.0, kQualityPreview) == kOfxStatOK);
+    CHECK(std::memcmp(finalRender.data(), dst.buf.data(), finalRender.size()) == 0);
+    userSet(fx, "animatePins", {0});
+    CHECK(render(fx, 10.0, 1.0) == kOfxStatOK);
+  }
   {
     // the bar tip followed the pin: around (200,160) is now opaque, the old tip is not
     CHECK(dst.get(200, 160, 3) > 0.9f);
