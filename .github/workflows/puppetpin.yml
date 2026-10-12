@@ -1,0 +1,50 @@
+name: Puppet Pin OFX
+
+on:
+  push:
+    paths:
+      - 'PuppetPinOFX/**'
+      - '.github/workflows/puppetpin.yml'
+  pull_request:
+    paths:
+      - 'PuppetPinOFX/**'
+      - '.github/workflows/puppetpin.yml'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (MSVC) build + tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        shell: cmd
+        run: PuppetPinOFX\build.bat
+      - name: Package
+        shell: pwsh
+        run: |
+          $pkg = 'package/PuppetPin'
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          Copy-Item PuppetPinOFX/build/PuppetPin.ofx.bundle $pkg -Recurse
+          Copy-Item PuppetPinOFX/install.ps1, PuppetPinOFX/README.md $pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PuppetPin-OFX-Win64
+          path: package/
+
+  linux:
+    name: Linux build + tests (with sanitizers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: |
+          cmake -S PuppetPinOFX -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+      - name: Address/undefined behaviour sanitizers
+        run: |
+          cmake -S PuppetPinOFX -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          cmake --build build-asan -j
+          ctest --test-dir build-asan --output-on-failure
