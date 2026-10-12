@@ -40,12 +40,14 @@ Efekt iki bölümden oluşur; en üstteki **Mode** listesinden seçilir:
 ### 1 - Mesh (place pins)
 
 1. Efekti bir video event'ine (ör. alfa kanallı bir PNG karaktere) uygulayın. Efekt bu modda açılır.
-2. Resim bükülmez. Algılanan yüzey üçgen ağ olarak resmin üzerine çizilir. Yalnızca **Mesh Settings**
+2. Resim bükülmez. FX penceresi açıkken algılanan yüzey üçgen ağ olarak önizlemenin üzerine çizilir
+   (overlay; her önizleme kalitesinde aynı incelikte görünür ve render'a girmez). Yalnızca **Mesh Settings**
    (Mesh Area, Alpha Threshold, Mesh Density, Expansion) görünür; ağı buradan ayarlayın.
 3. Pinleri yerleştirin. Bu modda pin nereye konursa resme oraya yapışır:
    - **Önizlemede tıklayın**: ilk boş pin tıkladığınız yere eklenir; sürükleyerek yerini değiştirin.
-   - veya **Pin N → Enabled** kutusunu işaretleyip **Position**'ı (önizlemedeki crosshair ya da X/Y değerleri) ayarlayın.
-   Pinleri eklem gibi düşünün: baş, gövde, dirsek, el, diz, ayak…
+   - veya **Add Pin** düğmesine basın: karenin ortasına bir pin eklenir, sonra onu sürükleyin.
+   Listede yalnızca eklediğiniz pinler görünür (en fazla 20). Pinleri eklem gibi düşünün: baş, gövde,
+   dirsek, el, diz, ayak…
 
 ### 2 - Animate (bend)
 
@@ -55,12 +57,11 @@ Efekt iki bölümden oluşur; en üstteki **Mode** listesinden seçilir:
 3. Bir pini sürükleyince (önizlemede ya da Position değeriyle) resim bükülür; diğer pinler resmi yerinde tutar.
 4. Animasyon için pinlerin **Position** parametresini VEGAS'ta normal şekilde keyframe'leyin.
 
-Animate modunda pinler önizlemede numaralarıyla görünür. **Final render'a girmezler**: *Show Pins = Auto*
-iken pinler yalnızca önizleme penceresi **Draft** veya **Preview** kalitesindeyken çizilir. Önizlemeyi
-Good/Best kalitede kullanıyorsanız pinleri VEGAS'ın overlay'i ve crosshair'leri gösterir.
+Animate modunda pinler önizleme overlay'inde numaralarıyla görünür ve **final render'a girmez**.
 
 Önizleme overlay kısayolları: boş yere tıkla = pin ekle, pine tıkla-sürükle = taşı,
-**Ctrl+tık** veya seçiliyken **Delete** = pini kaldır.
+**Ctrl+tık** veya seçiliyken **Delete** = pini kaldır. Bir pini listeden kaldırmak için **Enabled**
+kutusunun işaretini de kaldırabilirsiniz.
 
 İpuçları:
 - Pin, **Enabled** yapıldığı anda bulunduğu yere yapışır; bu yüzden pin eklemek resmi zıplatmaz.
@@ -75,26 +76,28 @@ Good/Best kalitede kullanıyorsanız pinleri VEGAS'ın overlay'i ve crosshair'le
 | Parametre | Mod | Açıklama |
 | --- | --- | --- |
 | Mode | her ikisi | *1 - Mesh*: ağ görünür, pinler resme yerleştirilir. *2 - Animate*: ağ gizli, pinler resmi büker. |
+| Add Pin | her ikisi | Karenin ortasına yeni bir pin ekler (önizlemede tıklamak da pin ekler). |
 | Mesh Settings → Mesh Area | Mesh | *Alpha (detect shape)*: sadece opak kısım ağlanır. *Whole frame*: tüm kare. |
 | Mesh Settings → Alpha Threshold | Mesh | Bu değerden daha opak pikseller yüzeye dahil edilir. |
 | Mesh Settings → Mesh Density | Mesh | Kare genişliği boyunca hücre sayısı (her hücre 2 üçgen). Yüksek = daha yumuşak bükülme, daha yavaş. |
 | Mesh Settings → Expansion | Mesh | Algılanan şekli bu kadar piksel büyütür (yumuşak kenarlar ağın içinde kalsın diye). |
 | Animate Settings → Rigidity | Animate | Çözücü iterasyonu. Yüksek = daha katı ve doğal bükülme, biraz daha yavaş. |
-| Animate Settings → Show Pins | Animate | *Auto*: pinler yalnızca Draft/Preview kalitedeki önizlemede çizilir. *Always*: render'da da. *Never*: hiç. |
+| Animate Settings → Show Pins | Animate | *Auto*: pinler önizleme overlay'inde görünür, render'a girmez (overlay desteklemeyen host'larda yalnızca Draft/Preview kalitedeki önizlemeye çizilir). *Always*: render edilen görüntüye de çizilir. *Never*: görüntüye hiç çizilmez. |
 | Animate Settings → Show Mesh On Overlay | Animate | Bükülmüş ağı önizleme overlay'inde gösterir (varsayılan kapalı, render'a girmez). |
 | Animate Settings → Reset All Pins | Animate | Etkin tüm pinleri yapışma noktalarına döndürür (o karede). |
 | Display → Draw Mesh & Pins Into Video | her ikisi | Ağı ve pinleri her modda ve render'da görüntüye çizer (kontrol amaçlı; final render'dan önce kapatın). |
 | Display → Invert Pin Y Axis | her ikisi | Yalnızca bir host'ta crosshair'ler resme göre ters (yukarı-aşağı) görünürse. |
-| Pin N → Enabled / Position | her ikisi | Pinin kendisi. Position 0..1 aralığında normalize kare koordinatıdır (keyframe'lenir). |
+| Pin N → Enabled / Position | her ikisi | Pinin kendisi; yalnızca eklenen pinler listelenir. Enabled'ı kaldırmak pini siler. Position 0..1 aralığında normalize kare koordinatıdır (0,0 sol alt, 1,1 sağ üst; keyframe'lenir). |
 | Pin N → Reset Position | Animate | Pini o karede yapışma noktasına döndürür. |
 
-Not: Mesh modunda ağ ve pinler her zaman görüntüye çizilir (hangi yüzeyin algılandığını görmeniz için).
-Final render'dan önce Mode'u **2 - Animate**'e alın.
+Not: VEGAS'ta ağ ve pinler önizleme overlay'inde çizilir (FX penceresi açıkken). Overlay desteklemeyen
+host'larda Mesh modunda ağ ve pinler görüntünün içine çizilir; orada final render'dan önce Mode'u
+**2 - Animate**'e alın.
 
 ## VEGAS scriptlerinden erişim
 
 Parametre adları VEGAS Script API'deki `OFXEffect.FindParameterByName` ile kullanılabilir:
-`mode` (0 = Mesh, 1 = Animate), `meshArea`, `alphaThreshold`, `meshDensity`, `expansion`, `rigidity`,
+`mode` (0 = Mesh, 1 = Animate), `addPin`, `meshArea`, `alphaThreshold`, `meshDensity`, `expansion`, `rigidity`,
 `animatePins`, `overlayMesh`, `resetAllPins`, `burnOverlay`, `invertPinY`, ve her pin için `pin01_on`, `pin01_pos`, `pin01_anchor` (gizli
 yapışma noktası), `pin01_reset` … `pin20_*`. `pinNN_pos` / `pinNN_anchor` birer `OFXDouble2DParameter`'dır.
 
@@ -104,9 +107,10 @@ yapışma noktası), `pin01_reset` … `pin20_*`. `pinNN_pos` / `pinNN_anchor` b
   `...\OFX\Plugins\PuppetPin.ofx.bundle\Contents\Win64\PuppetPin.ofx` yolunda olduğunu kontrol edin.
   Gerekirse VEGAS'ı **Ctrl+Shift** basılıyken açıp önbelleği temizleyin.
 - **Güncelledim ama değişmedi:** Efekti event'ten kaldırıp yeniden ekleyin (VEGAS örnek ayarlarını saklar).
-- **Animate modunda pinler görünmüyor:** önizleme kalitesini *Preview* veya *Draft* yapın ya da
-  *Animate Settings → Show Pins*'i *Always* yapın (render'dan önce *Auto*'ya döndürün). Overlay, FX penceresi
-  açıkken görünür.
+- **Pinler/ağ önizlemede görünmüyor:** overlay, efektin FX penceresi açıkken görünür. Görünmüyorsa
+  *Display → Draw Mesh & Pins Into Video*'yu açın (render'dan önce kapatın).
+- **Eski sürümde eklenen pinler sol alt köşede / kırmızı:** 1.0 sürümündeki bir hata pin değerlerini
+  yanlış kaydediyordu. Efekti event'ten kaldırıp yeniden ekleyin ve pinleri yeniden yerleştirin.
 - **Mode değişince parametreler gizlenmiyor:** bazı VEGAS sürümleri listeyi hemen yenilemeyebilir; FX
   penceresini kapatıp açın. Gizlenmeseler bile o moda ait olmayan ayarlar etkisizdir.
 - **Crosshair ile çizilen pin farklı yerde:** *Display → Invert Pin Y Axis*'i deneyin ve lütfen bildirin.
@@ -150,7 +154,11 @@ third_party/openfx  OpenFX başlık dosyaları (BSD-3-Clause)
 - Eksik host özellikleri hata sayılmaz; varsayılan değerle devam edilir.
 - Sabit pin bağlama (anchor) gizli parametrelerde tutulur ve `instanceChanged` ile güncellenir.
 - Mod değişince parametreler `kOfxParamPropSecret`/`kOfxParamPropEnabled` ile gizlenir/gösterilir.
-- Animate modunda pinlerin yalnızca önizlemede çizilmesi için VEGAS'ın render argümanındaki
-  `OfxImageEffectPropRenderQuality` (Draft/Preview = önizleme) kullanılır.
+- VEGAS overlay'de fare konumunu ve çizimi OFX standardındaki canonical (piksel) koordinatlar yerine
+  normalize kare koordinatlarında (0..1) veriyor. Eklenti hangi uzayın kullanıldığını
+  `kOfxInteractPropPixelScale`'den anlar (karenin ekrandaki genişliği hangi yorumda makulse o) ve her iki
+  durumda da doğru çalışır.
+- Overlay desteklemeyen host'larda Animate modundaki pinler, VEGAS'ın render argümanındaki
+  `OfxImageEffectPropRenderQuality` (Draft/Preview = önizleme) ile yalnızca önizlemeye çizilir.
 
 Lisans: OpenFX başlıkları BSD-3-Clause (`third_party/openfx/LICENSE.md`).

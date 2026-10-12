@@ -75,7 +75,7 @@ using puppet::Vec2;
 
 #define kPluginIdentifier "io.github.slayermafiayu.PuppetPin"
 #define kPluginVersionMajor 1
-#define kPluginVersionMinor 0
+#define kPluginVersionMinor 1
 #define kPluginLabel "Puppet Pin"
 #define kPluginGrouping "Distort"
 #define kPluginDescription                                                                   \
@@ -95,6 +95,7 @@ static const int kNumPins = 20;
 
 // Parameter names (also what VEGAS scripts see through OFXEffect.FindParameterByName).
 #define kParamMode "mode"
+#define kParamAddPin "addPin"
 #define kParamGroupMesh "meshGroup"
 #define kParamMeshArea "meshArea"
 #define kParamAlphaThreshold "alphaThreshold"
@@ -188,7 +189,7 @@ static void setDbl(OfxPropertySetHandle h, const char* name, int idx, double v) 
 struct OverlaySnapshot {
   bool valid = false;
   double time = 0.0;
-  std::vector<Vec2> edges;   // pairs of canonical coordinates
+  std::vector<Vec2> edges;   // pairs of points, normalised frame coordinates (0..1, y up)
   bool pinBound[kNumPins] = {};
 };
 
@@ -200,8 +201,9 @@ struct Instance {
                  density = nullptr, expansion = nullptr, animateGroup = nullptr, iterations = nullptr,
                  showPins = nullptr, overlayMesh = nullptr, resetAll = nullptr, burnOverlay = nullptr,
                  flipY = nullptr;
-  OfxParamHandle pinOn[kNumPins] = {}, pinPos[kNumPins] = {}, pinAnchor[kNumPins] = {},
-                 pinReset[kNumPins] = {};
+  OfxParamHandle addPin = nullptr;
+  OfxParamHandle pinGroup[kNumPins] = {}, pinOn[kNumPins] = {}, pinPos[kNumPins] = {},
+                 pinAnchor[kNumPins] = {}, pinReset[kNumPins] = {};
 
   std::mutex snapshotMutex;
   OverlaySnapshot snapshot;
@@ -379,20 +381,22 @@ static int previewState(OfxPropertySetHandle inArgs) {
   return interactive < 0 ? -1 : (interactive ? 1 : 0);
 }
 
-// What is drawn into the picture itself (so it is visible whatever the host
-// can draw on its preview):
+// What is drawn into the picture itself. On a host with overlays (VEGAS) the
+// mesh and the pins are drawn on the preview overlay instead, sharp at every
+// preview quality and never rendered. Without overlays:
 //  * Mesh part: the mesh (the detected surface) and the pins.
-//  * Animate part: no mesh; the pins only in preview renders (Auto), always,
-//    or never - so they can be seen and dragged but stay out of the render.
-static bool burnsMesh(const Settings& s) { return s.setup || s.burnOverlay; }
+//  * Animate part: no mesh; the pins only in preview renders (Auto).
+// "Draw Mesh & Pins Into Video" and Show Pins = Always force drawing.
+static bool burnsMesh(const Settings& s) { return s.burnOverlay || (s.setup && !gHostSupportsOverlays); }
 static bool burnsPins(const Settings& s, int preview) {
-  if (s.setup || s.burnOverlay || s.showPins == kShowPinsAlways) return true;
-  return s.showPins == kShowPinsAuto && preview == 1;
+  if (s.burnOverlay || (!s.setup && s.showPins == kShowPinsAlways)) return true;
+  if (gHostSupportsOverlays) return false;
+  return s.setup || (s.showPins == kShowPinsAuto && preview == 1);
 }
 // For isIdentity, where the render quality may not be known yet.
 static bool mayBurnPins(const Settings& s, int preview) {
   if (burnsPins(s, preview)) return true;
-  return s.showPins == kShowPinsAuto && preview < 0;
+  return !gHostSupportsOverlays && !s.setup && s.showPins == kShowPinsAuto && preview < 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -557,9 +561,13 @@ static void storeSnapshot(Instance* inst, double time, const Geometry& g, const 
     std::sort(edges.begin(), edges.end());
     edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
     snap.edges.reserve(edges.size() * 2);
+    auto toFrame = [&](Vec2 px) {
+      const Vec2 c = g.pixelToCanonical(px);
+      return Vec2((c.x - g.projX) / g.projW, (c.y - g.projY) / g.projH);
+    };
     for (uint64_t e : edges) {
-      snap.edges.push_back(g.pixelToCanonical(r.deformed[(size_t)(e >> 32)]));
-      snap.edges.push_back(g.pixelToCanonical(r.deformed[(size_t)(e & 0xffffffffu)]));
+      snap.edges.push_back(toFrame(r.deformed[(size_t)(e >> 32)]));
+      snap.edges.push_back(toFrame(r.deformed[(size_t)(e & 0xffffffffu)]));
     }
   }
   std::lock_guard<std::mutex> lock(inst->snapshotMutex);
@@ -598,7 +606,7 @@ static OfxStatus actionDescribe(OfxImageEffectHandle effect) {
   setStr(p, kOfxPropLongLabel, 0, "Puppet Pin (mesh warp)");
   setStr(p, kOfxPropPluginDescription, 0, kPluginDescription);
   setStr(p, kOfxImageEffectPluginPropGrouping, 0, kPluginGrouping);
-  setStr(p, kOfxPropVersionLabel, 0, "1.0");
+  setStr(p, kOfxPropVersionLabel, 0, "1.1");
   setInt(p, kOfxPropVersion, 0, kPluginVersionMajor);
   setInt(p, kOfxPropVersion, 1, kPluginVersionMinor);
   setStr(p, kOfxImageEffectPropSupportedContexts, 0, kOfxImageEffectContextFilter);
@@ -741,6 +749,10 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
            "place the pins on the picture. 2 - Animate: the mesh is hidden and moving the pins bends "
            "the picture - keyframe the pin positions to animate.",
            {"1 - Mesh (place pins)", "2 - Animate (bend)"}, kModeMesh, nullptr);
+  d.button(kParamAddPin, "Add Pin",
+           "Adds a pin in the middle of the frame; drag it where you want it. You can also click on the "
+           "preview to add a pin there. Only the pins you add are listed below.",
+           nullptr);
 
   // Part 1: mesh settings (only shown in Mesh mode)
   d.group(kParamGroupMesh, "Mesh Settings", true, "How the surface is detected and triangulated.");
@@ -766,9 +778,10 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
             "faster and softer.",
             20, 0, 200, 1, 60, kParamGroupAnimate);
   d.choice(kParamShowPins, "Show Pins",
-           "Pins drawn into the picture while animating. Auto: only in the preview window at Draft or "
-           "Preview quality, never in a render. Always: also in renders. Never: not drawn.",
-           {"Auto (preview only)", "Always", "Never"}, kShowPinsAuto, kParamGroupAnimate);
+           "Auto: pins are shown on the preview overlay and never rendered (on hosts without overlays "
+           "they are drawn into Draft/Preview quality previews only). Always: also drawn into the "
+           "rendered picture. Never: not drawn into the picture.",
+           {"Auto (preview only)", "Always (also in render)", "Never"}, kShowPinsAuto, kParamGroupAnimate);
   d.boolean(kParamOverlayMesh, "Show Mesh On Overlay",
             "Also draw the bent mesh on the preview overlay (never rendered).", false, kParamGroupAnimate);
   d.button(kParamResetAll, "Reset All Pins",
@@ -788,12 +801,12 @@ static OfxStatus actionDescribeInContext(OfxImageEffectHandle effect, OfxPropert
     char label[32];
     std::snprintf(label, sizeof(label), "Pin %d", k + 1);
     const std::string grp = pinParamName(k, "");
-    d.group(grp, label, k < 2, "One puppet pin.");
+    d.group(grp, label, true, "One puppet pin. Untick Enabled to remove it.");
     double u, v;
     defaultPinLocation(k, u, v);
     d.boolean(pinParamName(k, "_on"), "Enabled",
-              "Turns the pin on. A pin is stuck to the picture where it is when you enable it.", false,
-              grp.c_str());
+              "Untick to remove the pin. A pin is stuck to the picture where it is when it is enabled.",
+              false, grp.c_str());
     d.point(pinParamName(k, "_pos"), "Position",
             "Where the pin is. In Mesh mode this sticks the pin to the picture; in Animate mode it "
             "drags the picture. Keyframe it to animate the puppet.",
@@ -820,15 +833,36 @@ static void setParamVisible(OfxParamHandle h, bool visible) {
 }
 
 // The two parts of the effect show their own settings only: mesh settings in
-// Mesh mode, animation settings (and the per-pin reset buttons) in Animate mode.
-static void applyModeVisibility(Instance* inst, bool meshMode) {
+// Mesh mode, animation settings (and the per-pin reset buttons) in Animate
+// mode. Only the pins that were added are listed.
+static void applyVisibility(Instance* inst) {
+  const bool meshMode = getInt(inst->mode, 0.0, kModeMesh) != kModeAnimate;
   const OfxParamHandle meshParams[] = {inst->meshGroup, inst->meshArea, inst->alphaThreshold, inst->density,
                                        inst->expansion};
   const OfxParamHandle animParams[] = {inst->animateGroup, inst->iterations, inst->showPins, inst->overlayMesh,
                                        inst->resetAll};
   for (OfxParamHandle h : meshParams) setParamVisible(h, meshMode);
   for (OfxParamHandle h : animParams) setParamVisible(h, !meshMode);
-  for (int k = 0; k < kNumPins; ++k) setParamVisible(inst->pinReset[k], !meshMode);
+  for (int k = 0; k < kNumPins; ++k) {
+    const bool on = getBool(inst->pinOn[k], 0.0, false);
+    setParamVisible(inst->pinGroup[k], on);
+    setParamVisible(inst->pinOn[k], on);
+    setParamVisible(inst->pinPos[k], on);
+    setParamVisible(inst->pinReset[k], on && !meshMode);
+  }
+}
+
+// Enables the first unused pin at the given (normalised) spot. Returns its
+// index, or -1 when all pins are in use.
+static int addPinAt(Instance* inst, double t, double u, double v) {
+  for (int k = 0; k < kNumPins; ++k) {
+    if (!inst->pinOn[k] || !inst->pinPos[k] || getBool(inst->pinOn[k], t, false)) continue;
+    set2D(inst->pinPos[k], t, u, v);
+    set2D(inst->pinAnchor[k], t, u, v);
+    setBool(inst->pinOn[k], true);
+    return k;
+  }
+  return -1;
 }
 
 static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
@@ -843,6 +877,7 @@ static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
     inst->dstClip = nullptr;
   OfxParamSetHandle ps = inst->paramSet;
   inst->mode = fetchParam(ps, kParamMode);
+  inst->addPin = fetchParam(ps, kParamAddPin);
   inst->meshGroup = fetchParam(ps, kParamGroupMesh);
   inst->meshArea = fetchParam(ps, kParamMeshArea);
   inst->alphaThreshold = fetchParam(ps, kParamAlphaThreshold);
@@ -856,6 +891,7 @@ static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
   inst->burnOverlay = fetchParam(ps, kParamBurnOverlay);
   inst->flipY = fetchParam(ps, kParamFlipY);
   for (int k = 0; k < kNumPins; ++k) {
+    inst->pinGroup[k] = fetchParam(ps, pinParamName(k, "").c_str());
     inst->pinOn[k] = fetchParam(ps, pinParamName(k, "_on").c_str());
     inst->pinPos[k] = fetchParam(ps, pinParamName(k, "_pos").c_str());
     inst->pinAnchor[k] = fetchParam(ps, pinParamName(k, "_anchor").c_str());
@@ -867,8 +903,8 @@ static OfxStatus actionCreateInstance(OfxImageEffectHandle effect) {
     delete inst;
     return kOfxStatFailed;
   }
-  // show the settings of the part the (possibly loaded) effect is in
-  applyModeVisibility(inst, getInt(inst->mode, 0.0, kModeMesh) != kModeAnimate);
+  // show the settings of the part the (possibly loaded) effect is in, and its pins
+  applyVisibility(inst);
   return kOfxStatOK;
 }
 
@@ -904,7 +940,14 @@ static OfxStatus actionInstanceChanged(OfxImageEffectHandle effect, OfxPropertyS
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
 
   if (name == kParamMode) {
-    applyModeVisibility(inst, getInt(inst->mode, t, kModeMesh) != kModeAnimate);
+    applyVisibility(inst);
+    return kOfxStatOK;
+  }
+  if (name == kParamAddPin) {
+    gParam->paramEditBegin(inst->paramSet, "Add Pin");
+    addPinAt(inst, t, 0.5, 0.5);
+    gParam->paramEditEnd(inst->paramSet);
+    applyVisibility(inst);
     return kOfxStatOK;
   }
   if (name == kParamResetAll) {
@@ -919,6 +962,7 @@ static OfxStatus actionInstanceChanged(OfxImageEffectHandle effect, OfxPropertyS
   if (k < 0) return kOfxStatReplyDefault;
   if (suffix == "_on") {
     if (getBool(inst->pinOn[k], t, false)) anchorPinHere(inst, k, t);
+    applyVisibility(inst);
     return kOfxStatOK;
   }
   if (suffix == "_pos") {
@@ -955,7 +999,8 @@ static OfxStatus actionIsIdentity(OfxImageEffectHandle effect, OfxPropertySetHan
   if (!inst) return kOfxStatReplyDefault;
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
   const Settings s = readSettings(inst, t);
-  if (burnsMesh(s) || mayBurnPins(s, previewState(inArgs)) || (!s.setup && anyPinDisplaced(s)))
+  // Mesh mode always renders: that is where the mesh shown on the overlay is built.
+  if (s.setup || burnsMesh(s) || mayBurnPins(s, previewState(inArgs)) || anyPinDisplaced(s))
     return kOfxStatReplyDefault;
   gProp->propSetString(outArgs, kOfxPropName, 0, kOfxImageEffectSimpleSourceClipName);
   gProp->propSetDouble(outArgs, kOfxPropTime, 0, t);
@@ -1199,6 +1244,7 @@ struct InteractData {
   bool editOpen = false;
   int selectedPin = -1;
   bool ctrlDown = false;
+  double psx = -1.0, psy = -1.0;  // last pixel scale the host gave us
 };
 
 struct InteractContext {
@@ -1255,46 +1301,95 @@ static std::vector<OfxPointD> circle(double cx, double cy, double rx, double ry,
   return pts;
 }
 
+// Coordinates of the overlay. The OFX standard puts pens and drawing in
+// canonical (pixel) coordinates, but VEGAS uses normalised frame coordinates
+// (0..1 across the frame, y up). The pixel scale tells them apart: it says
+// how wide the frame would be on screen in either interpretation, and only
+// one of them is a believable size.
+struct InteractSpace {
+  bool normalised = false;
+  Geometry g;  // flipY applies to pin parameter values only
+  double psx = 1.0, psy = 1.0;
+
+  Vec2 frameToInteract(Vec2 n) const {
+    return normalised ? n : Vec2(n.x * g.projW + g.projX, n.y * g.projH + g.projY);
+  }
+  Vec2 interactToFrame(Vec2 p) const {
+    return normalised ? p : Vec2((p.x - g.projX) / g.projW, (p.y - g.projY) / g.projH);
+  }
+  Vec2 paramToInteract(double u, double v) const { return frameToInteract(Vec2(u, g.flipY ? 1.0 - v : v)); }
+  Vec2 interactToParam(Vec2 p) const {
+    const Vec2 n = interactToFrame(p);
+    return Vec2(n.x, g.flipY ? 1.0 - n.y : n.y);
+  }
+};
+
+static bool believableScreenWidth(double w) { return w >= 16.0 && w <= 65536.0; }
+
+static InteractSpace interactSpace(InteractContext& c, OfxPropertySetHandle inArgs, double t, bool flipY) {
+  InteractSpace sp;
+  sp.g = makeGeometry(c.inst, t, 1.0, 1.0, flipY);
+  double psx = propDouble(inArgs, kOfxInteractPropPixelScale, 0, -1.0);
+  double psy = propDouble(inArgs, kOfxInteractPropPixelScale, 1, psx);
+  if (psx > 0 && psy > 0) {
+    if (c.data) {
+      c.data->psx = psx;
+      c.data->psy = psy;
+    }
+  } else if (c.data && c.data->psx > 0) {  // not given with this action: use the last one
+    psx = c.data->psx;
+    psy = c.data->psy;
+  } else {
+    psx = psy = 1.0;
+  }
+  sp.psx = psx;
+  sp.psy = psy;
+  sp.normalised = believableScreenWidth(1.0 / psx) && !believableScreenWidth(sp.g.projW / psx);
+  return sp;
+}
+
 static OfxStatus interactDraw(const void* handle, OfxPropertySetHandle inArgs, OverlayPainter& paint) {
   InteractContext c;
   if (!interactContext(handle, inArgs, c)) return kOfxStatReplyDefault;
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
-  const double psx = std::max(1e-6, propDouble(inArgs, kOfxInteractPropPixelScale, 0, 1.0));
-  const double psy = std::max(1e-6, propDouble(inArgs, kOfxInteractPropPixelScale, 1, psx));
   const Settings s = readSettings(c.inst, t);
-  const Geometry g = makeGeometry(c.inst, t, 1.0, 1.0, s.flipY);
+  const InteractSpace sp = interactSpace(c, inArgs, t, s.flipY);
+  const double psx = sp.psx, psy = sp.psy;
 
-  // mesh from the last render at this frame
-  if (s.overlayMesh && !s.setup) {
-    std::vector<OfxPointD> pts;
-    {
-      std::lock_guard<std::mutex> lock(c.inst->snapshotMutex);
-      const OverlaySnapshot& snap = c.inst->snapshot;
-      if (snap.valid && std::fabs(snap.time - t) < 1e-6) {
-        pts.reserve(snap.edges.size());
-        for (const Vec2& p : snap.edges) pts.push_back({p.x, p.y});
-      }
-    }
-    if (!pts.empty()) {
-      paint.width(1.0f);
-      paint.colour(0.35f, 0.85f, 1.0f, 0.35f);
-      paint.lines(pts);
-    }
-  }
-
-  bool bound[kNumPins];
-  bool haveSnap = false;
+  // The mesh comes from the last render: in Mesh mode it is the picture's
+  // surface (it does not change with time); in Animate mode, the bent mesh of
+  // this very frame if asked for.
+  bool bound[kNumPins] = {};
+  bool haveBound = false;
+  std::vector<OfxPointD> mesh;
   {
     std::lock_guard<std::mutex> lock(c.inst->snapshotMutex);
-    haveSnap = c.inst->snapshot.valid && std::fabs(c.inst->snapshot.time - t) < 1e-6;
-    for (int k = 0; k < kNumPins; ++k) bound[k] = c.inst->snapshot.pinBound[k];
+    const OverlaySnapshot& snap = c.inst->snapshot;
+    const bool sameFrame = std::fabs(snap.time - t) < 1e-6;
+    if (snap.valid && (s.setup || sameFrame)) {
+      haveBound = true;
+      for (int k = 0; k < kNumPins; ++k) bound[k] = snap.pinBound[k];
+      if ((s.setup && !burnsMesh(s)) || (!s.setup && s.overlayMesh)) {
+        mesh.reserve(snap.edges.size());
+        for (const Vec2& p : snap.edges) {
+          const Vec2 q = sp.frameToInteract(p);
+          mesh.push_back({q.x, q.y});
+        }
+      }
+    }
   }
+  if (!mesh.empty()) {
+    paint.width(1.0f);
+    paint.colour(0.35f, 0.85f, 1.0f, s.setup ? 0.55f : 0.35f);
+    paint.lines(mesh);
+  }
+
   const double r = 7.0;
   for (int k = 0; k < kNumPins; ++k) {
     const PinValues& p = s.pins[k];
     if (!p.on) continue;
-    const Vec2 cp = g.normToCanonical(p.pu, p.pv);
-    const bool unbound = haveSnap && !bound[k];
+    const Vec2 cp = sp.paramToInteract(p.pu, p.pv);
+    const bool unbound = haveBound && !bound[k];
     const bool selected = c.data && (c.data->selectedPin == k || c.data->dragPin == k);
     // dark halo, filled dot, ring
     paint.colour(0.0f, 0.0f, 0.0f, 0.6f);
@@ -1323,13 +1418,13 @@ static OfxStatus interactDraw(const void* handle, OfxPropertySetHandle inArgs, O
   return kOfxStatOK;
 }
 
-static int hitPin(const Settings& s, const Geometry& g, Vec2 pen, double psx, double psy) {
+static int hitPin(const Settings& s, const InteractSpace& sp, Vec2 pen) {
   int best = -1;
   double bestD = 1e300;
   for (int k = 0; k < kNumPins; ++k) {
     if (!s.pins[k].on) continue;
-    const Vec2 cp = g.normToCanonical(s.pins[k].pu, s.pins[k].pv);
-    const double dx = (pen.x - cp.x) / psx, dy = (pen.y - cp.y) / psy;  // screen pixels
+    const Vec2 cp = sp.paramToInteract(s.pins[k].pu, s.pins[k].pv);
+    const double dx = (pen.x - cp.x) / sp.psx, dy = (pen.y - cp.y) / sp.psy;  // screen pixels
     const double d = dx * dx + dy * dy;
     if (d <= 12.0 * 12.0 && d < bestD) {
       bestD = d;
@@ -1350,33 +1445,33 @@ static OfxStatus interactPen(const char* action, const void* handle, OfxProperty
   InteractContext c;
   if (!interactContext(handle, inArgs, c) || !c.data) return kOfxStatReplyDefault;
   const double t = propDouble(inArgs, kOfxPropTime, 0, 0.0);
-  const double psx = std::max(1e-6, propDouble(inArgs, kOfxInteractPropPixelScale, 0, 1.0));
-  const double psy = std::max(1e-6, propDouble(inArgs, kOfxInteractPropPixelScale, 1, psx));
   const Vec2 pen(propDouble(inArgs, kOfxInteractPropPenPosition, 0, 0.0),
                  propDouble(inArgs, kOfxInteractPropPenPosition, 1, 0.0));
   const Settings s = readSettings(c.inst, t);
-  const Geometry g = makeGeometry(c.inst, t, 1.0, 1.0, s.flipY);
-  const Vec2 n = g.canonicalToNorm(pen);
+  const InteractSpace sp = interactSpace(c, inArgs, t, s.flipY);
+  const Vec2 n = sp.interactToParam(pen);  // pin parameter value under the pen
 
   if (std::strcmp(action, kOfxInteractActionPenDown) == 0) {
     endDrag(c);
-    int k = hitPin(s, g, pen, psx, psy);
+    int k = hitPin(s, sp, pen);
     if (k >= 0 && c.data->ctrlDown) {  // Ctrl+click removes a pin
       setBool(c.inst->pinOn[k], false);
       c.data->selectedPin = -1;
+      applyVisibility(c.inst);
       return kOfxStatOK;
     }
     if (k < 0) {
       // click on the picture: add the first free pin there
-      if (n.x < -0.05 || n.x > 1.05 || n.y < -0.05 || n.y > 1.05) return kOfxStatReplyDefault;
-      for (int i = 0; i < kNumPins && k < 0; ++i)
-        if (!s.pins[i].on && c.inst->pinOn[i] && c.inst->pinPos[i]) k = i;
-      if (k < 0) return kOfxStatReplyDefault;  // all pins in use
+      const Vec2 f = sp.interactToFrame(pen);
+      if (f.x < -0.05 || f.x > 1.05 || f.y < -0.05 || f.y > 1.05) return kOfxStatReplyDefault;
       gParam->paramEditBegin(c.inst->paramSet, "Add Puppet Pin");
+      k = addPinAt(c.inst, t, n.x, n.y);
+      if (k < 0) {  // all pins in use
+        gParam->paramEditEnd(c.inst->paramSet);
+        return kOfxStatReplyDefault;
+      }
       c.data->editOpen = true;
-      set2D(c.inst->pinPos[k], t, n.x, n.y);
-      set2D(c.inst->pinAnchor[k], t, n.x, n.y);
-      setBool(c.inst->pinOn[k], true);
+      applyVisibility(c.inst);
     } else {
       gParam->paramEditBegin(c.inst->paramSet, "Move Puppet Pin");
       c.data->editOpen = true;
@@ -1416,6 +1511,7 @@ static OfxStatus interactKey(const char* action, const void* handle, OfxProperty
       c.data->dragPin < 0) {
     setBool(c.inst->pinOn[c.data->selectedPin], false);
     c.data->selectedPin = -1;
+    applyVisibility(c.inst);
     return kOfxStatOK;
   }
   return kOfxStatReplyDefault;

@@ -686,12 +686,13 @@ static void instanceChanged(Effect& fx, const std::string& name, double t) {
   in.setD(kOfxPropTime, t);
   in.setD(kOfxImageEffectPropRenderScale, 1.0, 0);
   in.setD(kOfxImageEffectPropRenderScale, 1.0, 1);
+  const bool wasAllowed = gSetValueAllowed;
   gSetValueAllowed = true;
   call(kOfxActionBeginInstanceChanged, &fx, &in);
   OfxStatus s = call(kOfxActionInstanceChanged, &fx, &in);
   CHECK(s == kOfxStatOK || s == kOfxStatReplyDefault);
   call(kOfxActionEndInstanceChanged, &fx, &in);
-  gSetValueAllowed = false;
+  gSetValueAllowed = wasAllowed;
 }
 
 // user edits: set the value like the host UI would, then notify
@@ -965,7 +966,8 @@ int main(int argc, char** argv) {
     CHECK(!isSecret(n) && isEnabled(n));
   for (const char* n : {"animateGroup", "rigidity", "animatePins", "overlayMesh", "resetAllPins", "pin01_reset"})
     CHECK(isSecret(n) && !isEnabled(n));
-  CHECK(!isSecret("pin01_on") && !isSecret("pin01_pos") && isSecret("pin01_anchor"));
+  // only added pins are listed: none yet
+  for (const char* n : {"pin01", "pin01_on", "pin01_pos", "pin01_anchor", "pin20"}) CHECK(isSecret(n));
 
   std::printf("mesh mode render (mesh burned in)\n");
   CHECK(!isIdentity(fx, 0));
@@ -979,13 +981,15 @@ int main(int argc, char** argv) {
         ++total;
         same += std::memcmp(src.at(x, y), dst.at(x, y), 4) == 0;
       }
-    CHECK(same > total * 0.8);
-    CHECK(same < total);  // ... but the mesh is drawn
-    // without host overlays the (disabled, grey) pins are burned in too:
-    // pin 1's default spot is (0.2, 0.8) of the frame
-    const unsigned char* c = dst.at((int)(0.2 * W), (int)(0.8 * H));
-    const bool grey = std::abs((int)c[0] - (int)c[1]) < 8 && std::abs((int)c[1] - (int)c[2]) < 8 && c[3] > 100;
-    CHECK(grey == !overlays);
+    if (overlays) {
+      CHECK(same == total);  // the mesh is drawn on the preview overlay, not into the picture
+    } else {
+      CHECK(same > total * 0.8);
+      CHECK(same < total);  // the mesh is drawn into the picture
+      // ... and so are the (disabled, grey) pins: pin 1's default spot is (0.2, 0.8)
+      const unsigned char* c = dst.at((int)(0.2 * W), (int)(0.8 * H));
+      CHECK(std::abs((int)c[0] - (int)c[1]) < 8 && std::abs((int)c[1] - (int)c[2]) < 8 && c[3] > 100);
+    }
   }
 
   std::printf("place pins in setup mode\n");
@@ -1008,10 +1012,11 @@ int main(int argc, char** argv) {
   for (const char* n : {"animateGroup", "rigidity", "animatePins", "overlayMesh", "resetAllPins", "pin01_reset"})
     CHECK(!isSecret(n) && isEnabled(n));
   CHECK(!isSecret("pin01_pos") && isSecret("pin01_anchor"));
-  // nothing moved yet: a final render is the source, the preview still shows the pins
+  // nothing moved yet: a final render is the source; without host overlays the
+  // preview still has to draw the pins into the picture
   CHECK(isIdentity(fx, 0, kQualityBest));
-  CHECK(!isIdentity(fx, 0, kQualityPreview));
-  CHECK(!isIdentity(fx, 0));  // quality unknown: pins may have to be drawn
+  CHECK(isIdentity(fx, 0, kQualityPreview) == overlays);
+  CHECK(isIdentity(fx, 0) == overlays);  // quality unknown
 
   std::printf("animate: keyframe pin 3 upwards\n");
   Param* p3 = param(fx, "pin03_pos");
@@ -1025,17 +1030,28 @@ int main(int argc, char** argv) {
   CHECK(render(fx, 10.0, 1.0) == kOfxStatOK);
   if (!outDir.empty()) writePPM(dst, outDir + "/2_deformed.ppm");
   {
-    // preview render: same bent picture plus the pins, and no mesh
+    // preview render: same bent picture, no mesh; the pins are drawn into it
+    // only when the host has no overlay to show them on
     std::vector<unsigned char> finalRender = dst.buf;
     CHECK(render(fx, 10.0, 1.0, kQualityPreview) == kOfxStatOK);
     if (!outDir.empty()) writePPM(dst, outDir + "/2_deformed_preview.ppm");
-    int diff = 0;
-    for (size_t i = 0; i < finalRender.size(); i += 4) diff += std::memcmp(&finalRender[i], &dst.buf[i], 4) != 0;
+    auto diffPixels = [&]() {
+      int diff = 0;
+      for (size_t i = 0; i < finalRender.size(); i += 4) diff += std::memcmp(&finalRender[i], &dst.buf[i], 4) != 0;
+      return diff;
+    };
+    const int diff = diffPixels();
     std::printf("  preview differs from render in %d pixels (pin markers)\n", diff);
-    CHECK(diff > 100 && diff < 3000);  // three pins, no mesh lines
-    // pin 1 sits on the head: yellow marker (BGRA)
-    const unsigned char* c = dst.at(60, 90);
-    CHECK(c[2] > 200 && c[1] > 170 && c[0] < 80);
+    if (overlays) {
+      CHECK(diff == 0);
+    } else {
+      CHECK(diff > 100 && diff < 3000);  // three pins, no mesh lines
+      const unsigned char* c = dst.at(60, 90);  // pin 1 sits on the head: yellow marker (BGRA)
+      CHECK(c[2] > 200 && c[1] > 170 && c[0] < 80);
+    }
+    userSet(fx, "animatePins", {1});  // Always: drawn even into the final render
+    CHECK(render(fx, 10.0, 1.0) == kOfxStatOK);
+    CHECK(diffPixels() > 100);
     userSet(fx, "animatePins", {2});  // Never
     CHECK(render(fx, 10.0, 1.0, kQualityPreview) == kOfxStatOK);
     CHECK(std::memcmp(finalRender.data(), dst.buf.data(), finalRender.size()) == 0);
@@ -1137,26 +1153,35 @@ int main(int argc, char** argv) {
   userSet(fx, "pin04_on", {0});
 
   std::printf("overlay interact\n");
-  if (overlays) {
+  // Two coordinate conventions: the OFX standard (canonical pixels) and what
+  // VEGAS really does (normalised 0..1 frame coordinates, pixel scale in the
+  // same units: here a 940 pixel wide preview).
+  for (int pass = 0; overlays && pass < 2; ++pass) {
+    const bool vegasSpace = pass == 1;
+    std::printf("  %s overlay coordinates\n", vegasSpace ? "VEGAS (normalised)" : "canonical");
+    const double ps = vegasSpace ? 1.0 / 940.0 : 1.0;
+    auto sx = [&](double px) { return vegasSpace ? px / W : px; };
+    auto sy = [&](double py) { return vegasSpace ? py / H : py; };
+    p3->keys[10.0] = {200.0 / W, 160.0 / H};
     PropSet idesc;
     CHECK(overlay(kOfxActionDescribe, &idesc, nullptr, nullptr) == kOfxStatOK);
     InteractInstance ii;
     ii.props.setP(kOfxPropEffectInstance, &fx);
-    ii.props.setD(kOfxInteractPropPixelScale, 1.0, 0);
-    ii.props.setD(kOfxInteractPropPixelScale, 1.0, 1);
+    ii.props.setD(kOfxInteractPropPixelScale, ps, 0);
+    ii.props.setD(kOfxInteractPropPixelScale, ps, 1);
     CHECK(overlay(kOfxActionCreateInstance, &ii, nullptr, nullptr) == kOfxStatOK);
-    auto penArgs = [&](double x, double y, double t) {
+    auto penArgs = [&](double xPx, double yPx, double t) {
       PropSet in;
       in.setP(kOfxPropEffectInstance, &fx);
-      in.setD(kOfxInteractPropPixelScale, 1.0, 0);
-      in.setD(kOfxInteractPropPixelScale, 1.0, 1);
+      in.setD(kOfxInteractPropPixelScale, ps, 0);
+      in.setD(kOfxInteractPropPixelScale, ps, 1);
       in.setD(kOfxPropTime, t);
       in.setD(kOfxImageEffectPropRenderScale, 1.0, 0);
       in.setD(kOfxImageEffectPropRenderScale, 1.0, 1);
-      in.setD(kOfxInteractPropPenPosition, x, 0);
-      in.setD(kOfxInteractPropPenPosition, y, 1);
-      in.setI(kOfxInteractPropPenViewportPosition, (int)x, 0);
-      in.setI(kOfxInteractPropPenViewportPosition, (int)y, 1);
+      in.setD(kOfxInteractPropPenPosition, sx(xPx), 0);
+      in.setD(kOfxInteractPropPenPosition, sy(yPx), 1);
+      in.setI(kOfxInteractPropPenViewportPosition, (int)xPx, 0);
+      in.setI(kOfxInteractPropPenViewportPosition, (int)yPx, 1);
       in.setD(kOfxInteractPropPenPressure, 1.0);
       return in;
     };
@@ -1176,16 +1201,22 @@ int main(int argc, char** argv) {
     PropSet up = penArgs(220, 150, 10.0);
     CHECK(overlay(kOfxInteractActionPenUp, &ii, (OfxPropertySetHandle)&up, nullptr) == kOfxStatOK);
     CHECK(std::fabs(valueOf(fx, "pin03_pos", 10.0)[0] - 220.0 / W) < 1e-9);
-    CHECK(std::fabs(valueOf(fx, "pin03_anchor")[0] - n3[0]) < 1e-12);  // not in setup: anchor stays
+    CHECK(std::fabs(valueOf(fx, "pin03_pos", 10.0)[1] - 150.0 / H) < 1e-9);
+    CHECK(std::fabs(valueOf(fx, "pin03_anchor")[0] - n3[0]) < 1e-12);  // animate mode: anchor stays
     CHECK(fx.params.editDepth == 0);
-    // click on empty picture adds the first free pin (pin 4) there
+    // ... and the picture follows
+    CHECK(render(fx, 10.0, 1.0) == kOfxStatOK);
+    CHECK(dst.get(220, 150, 3) > 0.9f);
+    // click on empty picture adds the first free pin (pin 4) there and lists it
+    CHECK(isSecret("pin04"));
     PropSet add = penArgs(100, 60, 10.0);
     CHECK(overlay(kOfxInteractActionPenDown, &ii, (OfxPropertySetHandle)&add, nullptr) == kOfxStatOK);
     CHECK(overlay(kOfxInteractActionPenUp, &ii, (OfxPropertySetHandle)&add, nullptr) == kOfxStatOK);
     CHECK(valueOf(fx, "pin04_on")[0] == 1.0);
     CHECK(std::fabs(valueOf(fx, "pin04_anchor")[0] - 100.0 / W) < 1e-9);
     CHECK(std::fabs(valueOf(fx, "pin04_pos")[1] - 60.0 / H) < 1e-9);
-    // Delete removes the selected pin
+    CHECK(!isSecret("pin04") && !isSecret("pin04_pos"));
+    // Delete removes the selected pin (and unlists it)
     PropSet key;
     key.setP(kOfxPropEffectInstance, &fx);
     key.setD(kOfxPropTime, 10.0);
@@ -1193,13 +1224,33 @@ int main(int argc, char** argv) {
     key.setS(kOfxPropKeyString, "");
     CHECK(overlay(kOfxInteractActionKeyDown, &ii, (OfxPropertySetHandle)&key, nullptr) == kOfxStatOK);
     CHECK(valueOf(fx, "pin04_on")[0] == 0.0);
+    CHECK(isSecret("pin04"));
     // clicks far outside the frame are left to the host
     PropSet outside = penArgs(-500, -500, 10.0);
     CHECK(overlay(kOfxInteractActionPenDown, &ii, (OfxPropertySetHandle)&outside, nullptr) == kOfxStatReplyDefault);
+    // in Mesh mode a drag moves the pin on the picture (anchor too)
+    userSet(fx, "mode", {0});
+    PropSet md = penArgs(150, 90, 0.0), mm = penArgs(160, 95, 0.0);
+    CHECK(overlay(kOfxInteractActionPenDown, &ii, (OfxPropertySetHandle)&md, nullptr) == kOfxStatOK);
+    CHECK(overlay(kOfxInteractActionPenMotion, &ii, (OfxPropertySetHandle)&mm, nullptr) == kOfxStatOK);
+    CHECK(overlay(kOfxInteractActionPenUp, &ii, (OfxPropertySetHandle)&mm, nullptr) == kOfxStatOK);
+    CHECK(std::fabs(valueOf(fx, "pin02_anchor")[0] - 160.0 / W) < 1e-9);
+    CHECK(std::fabs(valueOf(fx, "pin02_pos")[1] - 95.0 / H) < 1e-9);
+    userSet(fx, "pin02_pos", {n2[0], n2[1]});  // back where it was (anchor follows in Mesh mode)
+    userSet(fx, "mode", {1});
     gSetValueAllowed = false;
     CHECK(overlay(kOfxActionDestroyInstance, &ii, nullptr, nullptr) == kOfxStatOK);
     CHECK(fx.params.editDepth == 0);
   }
+
+  std::printf("add pin button\n");
+  CHECK(valueOf(fx, "pin04_on")[0] == 0.0);
+  userSet(fx, "addPin", {}, 0.0);
+  CHECK(valueOf(fx, "pin04_on")[0] == 1.0);
+  CHECK(std::fabs(valueOf(fx, "pin04_pos")[0] - 0.5) < 1e-12 && std::fabs(valueOf(fx, "pin04_anchor")[1] - 0.5) < 1e-12);
+  CHECK(!isSecret("pin04") && !isSecret("pin04_reset"));
+  userSet(fx, "pin04_on", {0});
+  CHECK(isSecret("pin04") && isSecret("pin04_pos"));
 
   std::printf("purge caches / destroy / unload\n");
   CHECK(call(kOfxActionPurgeCaches, &fx) == kOfxStatOK);
