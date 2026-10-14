@@ -61,10 +61,10 @@ def _export_fixture(tmp_path, kind="pins", layers=False):
         (d / "layers").mkdir()
         Image.fromarray(arm, "RGBA").save(d / "layers" / "00_sag_kol.png")
         Image.fromarray(rest, "RGBA").save(d / "layers" / "01_govde.png")
-    (d / "rig_src.json").write_text(json.dumps(_rig_src()))
+    (d / "rig_src.json").write_text(json.dumps(_rig_src()), encoding="utf-8")
     spec = {"format": jobs.JOB_FORMAT, "kind": kind, "stage": {"width": 640, "height": 360, "fps": 25.0},
             "retarget": {"view_yaw_deg": 0.0}, "mesh": {"density": 30}}
-    (d / "job.json").write_text(json.dumps(spec))
+    (d / "job.json").write_text(json.dumps(spec), encoding="utf-8")
     jobs.prepare_stage(d, spec)
     cand = d / "cand_5"
     cand.mkdir()
@@ -79,7 +79,7 @@ def _export_fixture(tmp_path, kind="pins", layers=False):
             Image.new("RGBA", (64, 36), (i * 20, 0, 0, 255)).save(cand / "frames" / f"frame_{i:05d}.png")
         (cand / "preview.mp4").write_bytes(b"x")
         prov.params = {"fps": 24}
-    (cand / "provenance.json").write_text(json.dumps(prov.to_dict()))
+    (cand / "provenance.json").write_text(json.dumps(prov.to_dict()), encoding="utf-8")
     jobs.export_to_vegas(lay, d, 5)
     return lay
 
@@ -103,7 +103,7 @@ def test_pins_import_on_fake_timeline(driver, tmp_path):
     assert out["MODE"] == "1" and out["DENSITY"] == "30"
     pins = out["_pins"]
     assert len(pins) == 16
-    lines = (lay.outbox / "vegas-test_5" / "vegas_import.txt").read_text().splitlines()
+    lines = (lay.outbox / "vegas-test_5" / "vegas_import.txt").read_text(encoding="utf-8").splitlines()
     anchors = {int(l.split()[1]): (float(l.split()[2]), float(l.split()[3])) for l in lines if l.startswith("pin ")}
     last = {}
     for l in lines:
@@ -143,7 +143,7 @@ def test_layered_import_stacks_parts_front_on_top(driver, tmp_path):
     out = _run(driver, lay)
     top, bottom = out["TRACK0"].split("|"), out["TRACK1"].split("|")
     assert top[1].endswith("stage_layer_01_01_govde.png") and bottom[1].endswith("stage_layer_00_00_sag_kol.png")
-    lines = (lay.outbox / "vegas-test_5" / "vegas_import.txt").read_text().splitlines()
+    lines = (lay.outbox / "vegas-test_5" / "vegas_import.txt").read_text(encoding="utf-8").splitlines()
     joint = {int(l.split()[1]): l.split()[4] for l in lines if l.startswith("pin ")}
     layer_lines = [l for l in lines if l.startswith("layer ")]
     arm_pins = {joint[int(n)] for n in layer_lines[0].split()[1].split(",")}

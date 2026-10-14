@@ -88,7 +88,7 @@ def prepare_stage(job_dir: Path, spec: dict) -> tuple[Rig, Placement]:
     placement = Placement(**st["placement"]) if st.get("placement") else None
     mask = job_dir / "mask.png"
     stage = make_stage(job_dir / "character.png", size, mask if mask.is_file() else None, placement,
-                       center_x=float(st.get("center_x", 0.5)))
+                       center_x=float(st.get("center_x", 0.5)), height_fraction=float(st.get("char_height", 0.72)))
     stage.image.save(job_dir / "stage.png")
     layer_files = []
     layer_srcs = sorted((job_dir / "layers").glob("*.png")) if (job_dir / "layers").is_dir() else []
@@ -106,6 +106,17 @@ def prepare_stage(job_dir: Path, spec: dict) -> tuple[Rig, Placement]:
     write_json_atomic(job_dir / "stage.json", {"placement": asdict(stage.placement), "has_alpha": stage.has_alpha,
                                                "warnings": stage.warnings, "layers": layer_files})
     return rig, stage.placement
+
+
+def _frame_warnings(anim: PinAnimation) -> list[str]:
+    """Warns when the generated motion carries the character out of the frame."""
+    pts = np.stack([p.track for p in anim.pins], axis=1)  # (N, pins, 2)
+    outside = ((pts < -0.02) | (pts > 1.02)).any(axis=(1, 2))
+    if not outside.any():
+        return []
+    t = int(np.argmax(outside)) / anim.fps
+    return [f"Karakter {t:.1f}. saniyede kareden çıkıyor: başlangıç konumunu veya karakter yüksekliğini "
+            f"değiştirin ya da 'Sahnede yer değiştir'i kapatın."]
 
 
 def assign_layers(job_dir: Path, anim: PinAnimation) -> list[str]:
@@ -146,7 +157,7 @@ def make_pins(job_dir: Path, cand_dir: Path, spec: dict, k3d: np.ndarray, motion
     mesh = MeshSettings(**(spec.get("mesh") or {}))
     anim = build_pin_animation(res, rig.joints, rig.width, rig.height, prov, mesh)
     anim.stage_image = "stage.png"
-    anim.view["warnings"] = list(anim.view.get("warnings", [])) + assign_layers(job_dir, anim)
+    anim.view["warnings"] = list(anim.view.get("warnings", [])) + assign_layers(job_dir, anim) + _frame_warnings(anim)
     anim.save(cand_dir / "pins.json")
     preview = render_preview(anim, job_dir, cand_dir / "preview.mp4", cand_dir / "_work", progress=progress)
     return {"pins": "pins.json", "preview": "preview.mp4", "preview_kind": preview["kind"],

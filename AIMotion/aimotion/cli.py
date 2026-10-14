@@ -82,7 +82,8 @@ def run(layout, kind: str, a) -> int:
             shutil.copy2(p, d / "layers" / f"{i:02d}_{Path(p).stem}.png")
     seeds = [int(s) for s in a.seeds.split(",")] if a.seeds else [int(time.time()) % 1_000_000]
     spec = {"format": JOB_FORMAT, "kind": kind, "prompt": a.prompt, "duration_s": a.duration, "seeds": seeds,
-            "cfg_scale": a.cfg, "steps": a.steps, "profile": a.profile, "stage": _parse_stage(a.stage),
+            "cfg_scale": a.cfg, "steps": a.steps, "profile": a.profile,
+            "stage": dict(_parse_stage(a.stage), center_x=a.center_x, char_height=a.height),
             "retarget": {"view_yaw_deg": None if a.view == "auto" else float(a.view)},
             "unknown_vegas_policy": "allow" if a.ignore_unknown_vegas else "block",
             "allow_experimental": a.experimental}
@@ -97,7 +98,8 @@ def run(layout, kind: str, a) -> int:
     write_json_atomic(d / "job.json", spec)
     print(f"İş: {d}")
     proc = subprocess.Popen([sys.executable, "-m", "aimotion.worker", str(d)], cwd=str(PKG_ROOT),
-                            env=dict(os.environ, AIMOTION_ROOT=str(layout.root)))
+                            env=dict(os.environ, AIMOTION_ROOT=str(layout.root), PYTHONUTF8="1",
+                                     PYTHONIOENCODING="utf-8"))
     last = None
     try:
         while proc.poll() is None:
@@ -146,6 +148,8 @@ def main(argv=None) -> int:
         p.add_argument("--cfg", type=float, default=5.0)
         p.add_argument("--duration", type=float, default=4.0)
         p.add_argument("--stage", default="1920x1080@29.97")
+        p.add_argument("--center-x", type=float, default=0.5, help="karakterin başlangıçtaki yatay konumu (0-1)")
+        p.add_argument("--height", type=float, default=0.72, help="karakter yüksekliği / kare yüksekliği")
         p.add_argument("--export", action="store_true")
         p.add_argument("--experimental", action="store_true", help="kare modunu profil kapalı olsa da dene")
         p.add_argument("--ignore-unknown-vegas", action="store_true",

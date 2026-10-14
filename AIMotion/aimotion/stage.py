@@ -86,10 +86,11 @@ def build_stage(character: Image.Image, stage_size: tuple[int, int], placement: 
 
 
 def make_stage(character_path: Path, stage_size: tuple[int, int], mask_path: Optional[Path] = None,
-               placement: Optional[Placement] = None, center_x: float = 0.5) -> Stage:
+               placement: Optional[Placement] = None, center_x: float = 0.5, height_fraction: float = 0.72) -> Stage:
     rgba, has_alpha, warnings = load_character(character_path, mask_path)
     alpha = np.asarray(rgba.getchannel("A")) if has_alpha else None
-    placement = placement or auto_placement(rgba.size, stage_size, alpha, center_x=center_x)
+    placement = placement or auto_placement(rgba.size, stage_size, alpha, height_fraction=height_fraction,
+                                            center_x=center_x)
     return Stage(build_stage(rgba, stage_size, placement), placement, has_alpha, warnings)
 
 

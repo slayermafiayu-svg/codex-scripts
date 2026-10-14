@@ -21,8 +21,16 @@ def main(argv=None) -> int:
     if len(argv) != 1:
         print("kullanım: python -m aimotion.worker <iş klasörü>", file=sys.stderr)
         return 2
-    layout = resolve_layout()
-    apply_environment(layout)  # before torch/transformers/diffusers are imported
+    try:
+        layout = resolve_layout()
+        apply_environment(layout)  # before torch/transformers/diffusers are imported
+    except Exception as e:  # noqa: BLE001 - e.g. root not on D:; tell the UI instead of dying silently
+        import json
+
+        (Path(argv[0]) / "status.json").write_text(
+            json.dumps({"state": "error", "stage": "Hata", "error": f"{type(e).__name__}: {e}"}, ensure_ascii=False),
+            encoding="utf-8")
+        return 1
 
     from .guard import Cancelled, PlaybackGuard, lower_process_priority
     from .jobs import Status, read_json, run_job

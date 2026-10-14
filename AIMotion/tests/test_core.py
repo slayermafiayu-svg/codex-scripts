@@ -50,7 +50,7 @@ def test_openpose_and_wholebody_import(tmp_path):
         kp[i] = [100 + i * 10, 200 + i * 5, 0.9]
     doc = {"canvas_width": 1000, "canvas_height": 800, "people": [{"pose_keypoints_2d": kp.ravel().tolist()}]}
     f = tmp_path / "pose.json"
-    f.write_text(json.dumps([doc]))
+    f.write_text(json.dumps([doc]), encoding="utf-8")
     rig = load_rig_file(f, 2000, 1600)  # scaled to the stage
     assert rig.joints["l_shoulder"] == pytest.approx((2 * (100 + 50), 2 * (200 + 25)))
     assert "pelvis" in rig.joints and "chest" in rig.joints
@@ -151,7 +151,7 @@ def test_pin_animation_round_trip(tmp_path):
     back = PinAnimation.load(p)
     assert back.num_frames == 10 and back.mesh.density == 40
     assert np.allclose(back.pins[0].anchor, to_normalised(np.array(rig.joints["pelvis"]), 1920, 1080), atol=1e-5)
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     assert d["pins"][4]["param"] == "pin05"
     assert d["provenance"]["source"] == "test_fixture"
 
@@ -177,7 +177,7 @@ def test_sha256_cache_and_git_revision(tmp_path):
     cache = tmp_path / "h.json"
     h = sha256_file(f, cache)
     assert h == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    assert json.loads(cache.read_text())
+    assert json.loads(cache.read_text(encoding="utf-8"))
     g = tmp_path / "repo" / ".git"
     (g / "refs" / "heads").mkdir(parents=True)
     (g / "HEAD").write_text("ref: refs/heads/master\n")
@@ -188,7 +188,7 @@ def test_sha256_cache_and_git_revision(tmp_path):
 # --- guard -------------------------------------------------------------------
 
 def _write_state(p: Path, **kw):
-    p.write_text(json.dumps({"version": 1, "ts": kw.pop("ts"), **kw}))
+    p.write_text(json.dumps({"version": 1, "ts": kw.pop("ts"), **kw}), encoding="utf-8")
 
 
 def test_guard_states(tmp_path):

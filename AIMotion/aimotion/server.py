@@ -185,7 +185,8 @@ class App:
             "key_background": bool(body.get("key_background", True)),
             "unknown_vegas_policy": "allow" if body.get("vegas_unknown_allow") else "block",
             "stage": {"width": int(st.get("width", 1920)), "height": int(st.get("height", 1080)),
-                      "fps": float(st.get("fps", 29.97)), "center_x": float(st.get("center_x", 0.5))},
+                      "fps": float(st.get("fps", 29.97)), "center_x": float(st.get("center_x", 0.5)),
+                      "char_height": float(st.get("char_height", 0.72))},
             "retarget": body.get("retarget") or {},
             "mesh": body.get("mesh") or {},
         }
@@ -206,7 +207,7 @@ class App:
             if os.name == "nt":
                 flags = subprocess.CREATE_NO_WINDOW | 0x00004000  # BELOW_NORMAL_PRIORITY_CLASS
             log = open(self.layout.logs / f"{d.name}.log", "ab")
-            env = dict(os.environ, AIMOTION_ROOT=str(self.layout.root))
+            env = dict(os.environ, AIMOTION_ROOT=str(self.layout.root), PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
             self.proc = subprocess.Popen([sys.executable, "-m", "aimotion.worker", str(d)], cwd=str(PKG_ROOT),
                                          stdout=log, stderr=subprocess.STDOUT, creationflags=flags, env=env)
             log.close()

@@ -55,10 +55,10 @@ def test_fixture_job_to_vegas_manifest(layout, monkeypatch, tmp_path):
     d = layout.job_dir("test-job-1")
     d.mkdir(parents=True)
     (d / "character.png").write_bytes(_character_png())
-    (d / "rig_src.json").write_text(json.dumps(_rig_src()))
+    (d / "rig_src.json").write_text(json.dumps(_rig_src()), encoding="utf-8")
     spec = {"format": jobs.JOB_FORMAT, "kind": "pins", "stage": {"width": 640, "height": 360, "fps": 25.0},
             "retarget": {"view_yaw_deg": 0.0}, "mesh": {"density": 30}}
-    (d / "job.json").write_text(json.dumps(spec))
+    (d / "job.json").write_text(json.dumps(spec), encoding="utf-8")
     rig, placement = jobs.prepare_stage(d, spec)
     assert Image.open(d / "stage.png").size == (640, 360)
     assert 0 < placement.scale < 1  # 500 px tall character fitted into a 360 px stage
@@ -68,14 +68,14 @@ def test_fixture_job_to_vegas_manifest(layout, monkeypatch, tmp_path):
     prov = Provenance(source="test_fixture")
     info = jobs.make_pins(d, cand, spec, raise_left_arm(31), 30.0, prov)
     assert info["frames"] == 26 and (cand / "preview.mp4").stat().st_size > 0
-    (cand / "provenance.json").write_text(json.dumps(prov.to_dict()))
+    (cand / "provenance.json").write_text(json.dumps(prov.to_dict()), encoding="utf-8")
 
-    manifest = json.loads(jobs.export_to_vegas(layout, d, 7).read_text())
+    manifest = json.loads(jobs.export_to_vegas(layout, d, 7).read_text(encoding="utf-8"))
     assert manifest["kind"] == "pins" and manifest["label"] == "TEST - AI DEĞİL"
     out = layout.outbox / "test-job-1_7"
     anim = PinAnimation.load(out / "pins.json")
     assert anim.width == 640 and anim.fps == 25.0 and len(anim.pins) == 16  # no toes in this rig
-    latest = json.loads((layout.outbox / "latest.json").read_text())
+    latest = json.loads((layout.outbox / "latest.json").read_text(encoding="utf-8"))
     assert Path(latest["manifest"]) == out / "manifest.json"
 
     # pins anchored on the character's pixels (alpha > 0) in the stage image
@@ -89,20 +89,20 @@ def test_retarget_redo_records_edit(layout):
     d = layout.job_dir("test-job-2")
     d.mkdir(parents=True)
     (d / "character.png").write_bytes(_character_png())
-    (d / "rig_src.json").write_text(json.dumps(_rig_src()))
+    (d / "rig_src.json").write_text(json.dumps(_rig_src()), encoding="utf-8")
     spec = {"format": jobs.JOB_FORMAT, "kind": "pins", "stage": {"width": 640, "height": 360, "fps": 30.0}}
-    (d / "job.json").write_text(json.dumps(spec))
+    (d / "job.json").write_text(json.dumps(spec), encoding="utf-8")
     jobs.prepare_stage(d, spec)
     cand = d / "cand_3"
     cand.mkdir()
     np.savez_compressed(cand / "motion.npz", keypoints3d=raise_left_arm(20), fps=30.0)
-    (cand / "provenance.json").write_text(json.dumps(Provenance(source="test_fixture").to_dict()))
-    (d / "status.json").write_text(json.dumps({"state": "done", "results": [{"seed": 3, "dir": "cand_3"}]}))
+    (cand / "provenance.json").write_text(json.dumps(Provenance(source="test_fixture").to_dict()), encoding="utf-8")
+    (d / "status.json").write_text(json.dumps({"state": "done", "results": [{"seed": 3, "dir": "cand_3"}]}), encoding="utf-8")
     info = jobs.redo_pins(layout, d, 3, {"view_yaw_deg": 0.0, "root_motion": False})
     assert info["view"]["yaw_deg"] == 0.0
-    prov = json.loads((cand / "provenance.json").read_text())
+    prov = json.loads((cand / "provenance.json").read_text(encoding="utf-8"))
     assert prov["edits"][0]["type"] == "retarget"
-    assert json.loads((d / "status.json").read_text())["results"][0]["frames"] == 20
+    assert json.loads((d / "status.json").read_text(encoding="utf-8"))["results"][0]["frames"] == 20
 
 
 @pytest.fixture
@@ -165,3 +165,15 @@ def test_http_flow_without_models(server, layout):
     assert s["state"] == "error", s
     assert "HY-Motion" in s["error"] or "GPU" in s["error"]
     assert not s.get("results")
+
+
+def test_out_of_frame_warning():
+    from aimotion.pins import MeshSettings, PinTrack
+
+    track = np.stack([np.linspace(0.5, 1.3, 30), np.full(30, 0.4)], axis=1)
+    anim = PinAnimation(640, 360, 30.0, [PinTrack(1, "pelvis", "", (0.5, 0.4), track)], MeshSettings(),
+                        Provenance(source="test_fixture"))
+    w = jobs._frame_warnings(anim)
+    assert len(w) == 1 and "kareden çıkıyor" in w[0]
+    anim.pins[0].track = np.full((30, 2), 0.5)
+    assert jobs._frame_warnings(anim) == []

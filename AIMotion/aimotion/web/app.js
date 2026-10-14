@@ -232,7 +232,7 @@ $("go").onclick = async () => {
       job_id: S.job, kind: $("kind").value, prompt: $("prompt").value, duration_s: Number($("duration").value),
       candidates: Number($("cands").value), profile: $("profile").value,
       rig: { width: S.imgW, height: S.imgH, joints: S.joints, source: "ui" },
-      stage: { width: Number($("pw").value), height: Number($("ph").value), fps: Number($("pfps").value), center_x: Number($("cx").value) },
+      stage: { width: Number($("pw").value), height: Number($("ph").value), fps: Number($("pfps").value), center_x: Number($("cx").value), char_height: Number($("ch").value) },
       retarget: retargetOptions(),
     });
     $("results").innerHTML = "";

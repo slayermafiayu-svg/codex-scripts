@@ -17,5 +17,5 @@ if errorlevel 1 (
   --rig examples\demo_side\rig.json ^
   --layers examples\demo_side\layers\00_uzak_kol.png examples\demo_side\layers\01_uzak_bacak.png examples\demo_side\layers\02_govde.png examples\demo_side\layers\03_yakin_bacak.png examples\demo_side\layers\04_yakin_kol.png ^
   --prompt "A person walks forward at a relaxed pace, arms swinging naturally." ^
-  --duration 4 --seeds 11,22 --stage 1920x1080@29.97 --export %*
+  --duration 4 --seeds 11,22 --stage 1920x1080@29.97 --center-x 0.2 --height 0.45 --export %*
 pause
