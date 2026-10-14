@@ -1,0 +1,6 @@
+aimotion.json
+bin/
+native/build/
+__pycache__/
+.pytest_cache/
+vegas/*.dll

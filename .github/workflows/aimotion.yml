@@ -1,0 +1,63 @@
+name: AI Motion
+
+on:
+  push:
+    paths:
+      - 'AIMotion/**'
+      - 'PuppetPinOFX/src/PuppetCore.h'
+      - '.github/workflows/aimotion.yml'
+  pull_request:
+    paths:
+      - 'AIMotion/**'
+      - 'PuppetPinOFX/src/PuppetCore.h'
+      - '.github/workflows/aimotion.yml'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows - puppet_render (MSVC), C# 5 check (.NET Framework csc), tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build puppet_render.exe
+        shell: pwsh
+        run: |
+          cmake -S AIMotion/native -B build-native -A x64
+          cmake --build build-native --config Release
+          New-Item -ItemType Directory -Force AIMotion/bin | Out-Null
+          Copy-Item build-native/Release/puppet_render.exe AIMotion/bin/
+      - name: Compile VEGAS extension + script as C# 5 against the stub API
+        shell: cmd
+        run: |
+          set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          "%CSC%" /nologo /target:library /langversion:5 /out:stub.dll AIMotion\tests\vegas_stub\ScriptPortal.Vegas.Stub.cs || exit /b 1
+          "%CSC%" /nologo /target:library /langversion:5 /warnaserror+ /out:AIMotionBridge.dll /reference:stub.dll /reference:System.Windows.Forms.dll AIMotion\vegas\AIMotionBridge.cs AIMotion\vegas\AIMotion_Import.cs || exit /b 1
+      - name: Python tests
+        shell: pwsh
+        run: |
+          python -m pip install -r AIMotion/requirements-dev.txt
+          cd AIMotion
+          $env:AIMOTION_PUPPET_RENDER = "$PWD\bin\puppet_render.exe"
+          python -m pytest -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIMotion-Win64
+          path: AIMotion/bin/puppet_render.exe
+
+  linux:
+    name: Linux - tests (renderer, retargeting, server, C# via Mono)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg mono-mcs mono-runtime libmono-system-windows-forms4.0-cil
+      - name: Tests
+        run: |
+          python -m pip install -r AIMotion/requirements-dev.txt
+          cd AIMotion && python -m pytest -q

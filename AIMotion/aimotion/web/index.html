@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Motion – VEGAS</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>AI Motion <span class="sub">VEGAS Pro için yerel hareket üretimi</span></h1>
+  <div class="chips">
+    <span id="chip-gpu" class="chip">GPU …</span>
+    <span id="chip-vegas" class="chip">VEGAS …</span>
+    <span id="chip-models" class="chip">Modeller …</span>
+  </div>
+</header>
+
+<main>
+  <section class="col">
+    <div class="card">
+      <h2><span class="n">1</span> Görsel seç</h2>
+      <div class="row">
+        <label class="btn">Karakter resmi… <input id="file" type="file" accept="image/png,image/webp,image/jpeg" hidden></label>
+        <label class="btn ghost">Maske (isteğe bağlı)… <input id="mask" type="file" accept="image/png" hidden></label>
+        <label class="btn ghost">Parça katmanları… <input id="layers" type="file" accept="image/png" multiple hidden></label>
+      </div>
+      <p class="hint" id="layers-hint">Parça katmanları (isteğe bağlı): karakterle aynı boyutta saydam PNG'ler, arkadan öne
+        ada göre sıralanır (ör. 00_uzak_kol, 01_uzak_bacak, 02_govde, 03_yakin_bacak, 04_yakin_kol). Yandan yürüyüşte
+        kol/bacak gövdeyi sürüklemesin diye her parça ayrı ağ ile bükülür.</p>
+      <p class="hint">En iyi sonuç: arka planı saydam (dekupe) PNG. Maske verirseniz beyaz alan karakter sayılır.</p>
+      <div id="alpha-warn" class="warn" hidden>Resimde saydamlık yok: arka plan da bükülür. Mevcut SAM aracınızla dekupe edip yükleyin.</div>
+      <div class="editor-wrap"><canvas id="editor" width="520" height="540"></canvas></div>
+      <div class="row">
+        <button id="tpl" class="btn ghost" disabled>Şablon iskelet yerleştir</button>
+        <label class="btn ghost">DWPose/OpenPose JSON… <input id="rigjson" type="file" accept=".json,application/json" hidden></label>
+        <button id="detect" class="btn ghost" disabled hidden>Otomatik algıla</button>
+      </div>
+      <p class="hint">Eklemleri sürükleyerek düzeltin. Pinler bu noktalara yapışır (en fazla 20; burada 18).</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span> Hareketi tarif et</h2>
+      <textarea id="prompt" rows="3" placeholder="A person walks forward slowly, then sits down on a chair."></textarea>
+      <p class="hint">Model resmi örneklerde İngilizce tarifler kullanır; İngilizce yazmanız önerilir. Kısa ve tek sahneli tarifler daha iyi çalışır.</p>
+      <div class="grid">
+        <label>Çıktı
+          <select id="kind">
+            <option value="pins">Düzenlenebilir pinler (HY-Motion → Puppet Pin)</option>
+            <option value="frames">Video kareleri (Wan2.2-TI2V-5B)</option>
+          </select>
+        </label>
+        <label>Süre (sn) <input id="duration" type="number" min="0.7" max="12" step="0.1" value="4"></label>
+        <label>Aday sayısı <input id="cands" type="number" min="1" max="4" step="1" value="2"></label>
+        <label>VRAM profili
+          <select id="profile">
+            <option value="auto">Otomatik</option>
+            <option value="8gb">8 GB</option>
+            <option value="16gb">16 GB</option>
+            <option value="24gb">24 GB</option>
+          </select>
+        </label>
+      </div>
+      <details class="adv">
+        <summary>Sahne ve aktarım ayarları</summary>
+        <div class="grid">
+          <label>Proje genişliği <input id="pw" type="number" value="1920"></label>
+          <label>Proje yüksekliği <input id="ph" type="number" value="1080"></label>
+          <label>Proje fps <input id="pfps" type="number" step="0.001" value="29.97"></label>
+          <label>Başlangıç konumu (0–1) <input id="cx" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+        </div>
+        <p class="hint" id="proj-hint">VEGAS köprü eklentisi açıksa proje boyutu oradan alınır.</p>
+      </details>
+      <div class="grid">
+        <label>Görünüm
+          <select id="view">
+            <option value="">Otomatik (resimden)</option>
+            <option value="0">Önden</option>
+            <option value="90">Yandan, sağa bakıyor</option>
+            <option value="-90">Yandan, sola bakıyor</option>
+            <option value="45">3/4, sağa dönük</option>
+            <option value="-45">3/4, sola dönük</option>
+          </select>
+        </label>
+        <label class="check"><input id="root" type="checkbox" checked> Sahnede yer değiştir</label>
+        <label class="check"><input id="footlock" type="checkbox" checked> Ayak kilidi</label>
+      </div>
+      <div class="row">
+        <button id="go" class="btn primary" disabled>Üret</button>
+        <button id="cancel" class="btn ghost" hidden>İptal</button>
+      </div>
+      <div id="progress" class="progress" hidden><div class="bar"></div><span class="label"></span></div>
+      <div id="error" class="error" hidden></div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="card">
+      <h2><span class="n">3</span> Önizle ve VEGAS'a aktar</h2>
+      <div id="results"><p class="hint">Üretilen adaylar burada görünür. Her sonuç, hangi modelin hangi seed ile ürettiğini taşır.</p></div>
+    </div>
+    <div class="card">
+      <h2>Bu bilgisayar</h2>
+      <div id="sysinfo" class="sysinfo"></div>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

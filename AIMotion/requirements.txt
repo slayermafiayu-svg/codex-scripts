@@ -1,0 +1,21 @@
+# AI Motion - Python packages (Windows, NVIDIA GPU).
+# torch/torchvision come first from the CUDA index (install.ps1 does this):
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
+# Versions follow HY-Motion-1.0's requirements.txt where it pins them (torch, transformers,
+# einops, torchdiffeq, omegaconf); diffusers is the newest release that still accepts
+# huggingface_hub < 1.0, which transformers 4.53 needs.
+numpy>=1.24,<2.0
+pillow>=10.0
+scipy>=1.10
+pyyaml>=6.0
+omegaconf==2.3.0
+einops==0.8.1
+torchdiffeq==0.2.5
+transformers==4.53.3
+accelerate>=0.30.1,<2.0
+safetensors>=0.4
+huggingface_hub>=0.34,<1.0
+diffusers==0.35.2
+ftfy>=6.1
+imageio-ffmpeg>=0.5
+psutil>=5.9
