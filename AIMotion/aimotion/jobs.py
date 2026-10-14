@@ -157,7 +157,9 @@ def make_pins(job_dir: Path, cand_dir: Path, spec: dict, k3d: np.ndarray, motion
     mesh = MeshSettings(**(spec.get("mesh") or {}))
     anim = build_pin_animation(res, rig.joints, rig.width, rig.height, prov, mesh)
     anim.stage_image = "stage.png"
-    anim.view["warnings"] = list(anim.view.get("warnings", [])) + assign_layers(job_dir, anim) + _frame_warnings(anim)
+    stage_warnings = (read_json(job_dir / "stage.json", {}) or {}).get("warnings", [])
+    anim.view["warnings"] = (list(stage_warnings) + list(anim.view.get("warnings", [])) + assign_layers(job_dir, anim)
+                             + _frame_warnings(anim))
     anim.save(cand_dir / "pins.json")
     preview = render_preview(anim, job_dir, cand_dir / "preview.mp4", cand_dir / "_work", progress=progress)
     return {"pins": "pins.json", "preview": "preview.mp4", "preview_kind": preview["kind"],

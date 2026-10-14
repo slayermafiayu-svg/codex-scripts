@@ -313,6 +313,8 @@ def make_handler(app: App):
                 if self.command in ("GET", "HEAD"):
                     if not parts:
                         return self._file(WEB_DIR / "index.html")
+                    if parts == ["favicon.ico"]:
+                        return self._send(204, b"", "image/x-icon")
                     if parts[0] == "static" and len(parts) == 2 and re.match(r"^[\w.-]+$", parts[1]):
                         return self._file(WEB_DIR / parts[1])
                     if parts[0] == "files" and len(parts) >= 3:
